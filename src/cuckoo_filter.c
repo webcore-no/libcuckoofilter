@@ -1,5 +1,6 @@
-
-#include "cuckoo_filter.h"
+#include "../include/cuckoo_filter.h"
+#include <pthread.h>
+#include <stdint.h>
 
 #define CUCKOO_NESTS_PER_BUCKET     4
 
@@ -24,6 +25,9 @@ typedef struct {
 } cuckoo_result_t;
 
 struct cuckoo_filter_t {
+#ifdef RWLOCK
+  pthread_rwlock_t      rwlock;
+#endif
   uint32_t              bucket_count;
   uint32_t              nests_per_bucket;
   uint32_t              mask;
@@ -44,10 +48,10 @@ next_power_of_two (size_t x) {
   x |= x >> 2;
   x |= x >> 4;
   x |= x >> 8;
-  x |= x >> 16; 
+  x |= x >> 16;
 
   if (8 == sizeof(size_t)) {
-    x |= x >> 32; 
+    x |= x >> 32;
   }
 
   return ++x;
@@ -55,6 +59,28 @@ next_power_of_two (size_t x) {
 
 /* ------------------------------------------------------------------------- */
 
+
+#ifdef RWLOCK
+static inline CUCKOO_FILTER_RETURN write_lock_filter( cuckoo_filter_t *filter) {
+  if(pthread_rwlock_wrlock(&filter->rwlock)) {
+    return CUCKOO_FILTER_ALLOCATION_FAILED;
+  }
+  return CUCKOO_FILTER_OK;
+}
+static inline CUCKOO_FILTER_RETURN read_lock_filter( cuckoo_filter_t *filter) {
+  if(pthread_rwlock_rdlock(&filter->rwlock)) {
+    return CUCKOO_FILTER_ALLOCATION_FAILED;
+  }
+  return CUCKOO_FILTER_OK;
+}
+static inline void unlock_filter( cuckoo_filter_t *filter) {
+  pthread_rwlock_unlock(&filter->rwlock);
+}
+#else
+static inline CUCKOO_FILTER_RETURN write_lock_filter( cuckoo_filter_t *filter) {}
+static inline CUCKOO_FILTER_RETURN read_lock_filter( cuckoo_filter_t *filter) {}
+static inline void unlock_filter( cuckoo_filter_t *filter) {}
+#endif
 static inline CUCKOO_FILTER_RETURN
 add_fingerprint_to_bucket (
   cuckoo_filter_t      *filter,
@@ -102,11 +128,11 @@ cuckoo_filter_move (
   cuckoo_filter_t      *filter,
   uint32_t              fingerprint,
   uint32_t              h1,
-  int                   depth
+  uint32_t              depth
 ) {
   uint32_t h2 = ((h1 ^ hash(&fingerprint, sizeof(fingerprint),
     filter->bucket_count, 900, filter->seed)) % filter->bucket_count);
-  
+
   if (CUCKOO_FILTER_OK == add_fingerprint_to_bucket(filter,
     fingerprint, h1)) {
     return CUCKOO_FILTER_OK;
@@ -117,18 +143,20 @@ cuckoo_filter_move (
     return CUCKOO_FILTER_OK;
   }
 
-//printf("depth = %u\n", depth);
+
   if (filter->max_kick_attempts == depth) {
     return CUCKOO_FILTER_FULL;
   }
-  
+
+  //Randomly select a hash
   size_t row = (0 == (rand() % 2) ? h1 : h2);
+
+  //Randomly select a nest
   size_t col = (rand() % filter->nests_per_bucket);
-  size_t elem =
-    filter->bucket[(row * filter->nests_per_bucket) + col].fingerprint;
-  filter->bucket[(row * filter->nests_per_bucket) + col].fingerprint =
-    fingerprint;
-  
+
+  cuckoo_nest_t *item = &filter->bucket[(row * filter->nests_per_bucket) + col];
+  size_t elem = item->fingerprint;
+  item->fingerprint = fingerprint;
   return cuckoo_filter_move(filter, elem, row, (depth + 1));
 
 } /* cuckoo_filter_move() */
@@ -164,9 +192,18 @@ cuckoo_filter_new (
   new_filter->bucket_count = bucket_count;
   new_filter->nests_per_bucket = CUCKOO_NESTS_PER_BUCKET;
   new_filter->max_kick_attempts = max_kick_attempts;
-  new_filter->seed = (size_t) time(NULL);
+  if(!seed) {
+    seed = (size_t) time(NULL);
+  }
+  new_filter->seed = seed;
   //new_filter->seed = (size_t) 10301212;
   new_filter->mask = (uint32_t) ((1U << (sizeof(cuckoo_nest_t) * 8)) - 1);
+
+#ifdef RWLOCK
+  if(pthread_rwlock_init(&new_filter->rwlock, NULL)) {
+    printf("INIT FAILED");
+  }
+#endif
 
   *filter = new_filter;
 
@@ -180,6 +217,10 @@ CUCKOO_FILTER_RETURN
 cuckoo_filter_free (
   cuckoo_filter_t     **filter
 ) {
+#ifdef RWLOCK
+  pthread_rwlock_destroy(&(*filter)->rwlock);
+#endif
+  //free((*filter)->rwlock);
   free(*filter);
   *filter = NULL;
 
@@ -227,7 +268,7 @@ cuckoo_filter_lookup (
   result->item.fingerprint = fingerprint;
   result->item.h1 = h1;
   result->item.h2 = h2;
-            
+
   return ((true == result->was_found)
     ? CUCKOO_FILTER_OK : CUCKOO_FILTER_NOT_FOUND);
 
@@ -241,20 +282,28 @@ cuckoo_filter_add (
   void                 *key,
   size_t                key_length_in_bytes
 ) {
+  int errnum;
+  int ret;
   cuckoo_result_t   result;
-
+  if(write_lock_filter(filter) != CUCKOO_FILTER_OK) {
+    return CUCKOO_FILTER_ALLOCATION_FAILED;
+  }
   cuckoo_filter_lookup(filter, &result, key, key_length_in_bytes);
   if (true == result.was_found) {
-    return CUCKOO_FILTER_OK;
+    ret = CUCKOO_FILTER_OK;
+    goto END;
   }
 
   if (NULL != filter->last_victim) {
-    return CUCKOO_FILTER_FULL;
+    ret = CUCKOO_FILTER_FULL;
+    goto END;
   }
-
-  return cuckoo_filter_move(filter, result.item.fingerprint, result.item.h1,
+  ret = cuckoo_filter_move(filter, result.item.fingerprint, result.item.h1,
     0);
 
+END:
+  unlock_filter(filter);
+  return ret;
 } /* cuckoo_filter_add() */
 
 /* ------------------------------------------------------------------------- */
@@ -266,11 +315,16 @@ cuckoo_filter_remove (
   size_t                key_length_in_bytes
 ) {
   cuckoo_result_t   result;
+  int ret;
   bool              was_deleted = false;
+  if(write_lock_filter(filter) != CUCKOO_FILTER_OK) {
+    return CUCKOO_FILTER_ALLOCATION_FAILED;
+  }
 
   cuckoo_filter_lookup(filter, &result, key, key_length_in_bytes);
   if (false == result.was_found) {
-    return CUCKOO_FILTER_NOT_FOUND;
+    ret = CUCKOO_FILTER_NOT_FOUND;
+    goto END;
   }
 
   if (CUCKOO_FILTER_OK == remove_fingerprint_from_bucket(filter,
@@ -282,11 +336,13 @@ cuckoo_filter_remove (
   }
 
   if ((true == was_deleted) & (NULL != filter->last_victim)) {
-  
+
   }
 
-  return ((true == was_deleted) ? CUCKOO_FILTER_OK : CUCKOO_FILTER_NOT_FOUND);
-
+  ret = ((true == was_deleted) ? CUCKOO_FILTER_OK : CUCKOO_FILTER_NOT_FOUND);
+END:
+  unlock_filter(filter);
+  return ret;
 } /* cuckoo_filter_remove() */
 
 /* ------------------------------------------------------------------------- */
@@ -297,9 +353,14 @@ cuckoo_filter_contains (
   void                 *key,
   size_t                key_length_in_bytes
 ) {
+  CUCKOO_FILTER_RETURN ret;
   cuckoo_result_t   result;
-
-  return cuckoo_filter_lookup(filter, &result, key, key_length_in_bytes);
+  if(read_lock_filter(filter) != CUCKOO_FILTER_OK) {
+    return CUCKOO_FILTER_ALLOCATION_FAILED;
+  }
+  ret = cuckoo_filter_lookup(filter, &result, key, key_length_in_bytes);
+  unlock_filter(filter);
+  return ret;
 
 } /* cuckoo_filter_contains() */
 
@@ -375,7 +436,7 @@ hash (
 ) {
   uint32_t h1 = murmurhash(key, key_length_in_bytes, seed);
   uint32_t h2 = murmurhash(key, key_length_in_bytes, h1);
-        
+
   return ((h1 + (n * h2)) % size);
 
 } /* hash() */

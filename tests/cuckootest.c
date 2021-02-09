@@ -1,7 +1,7 @@
-#include "cuckoo_filter.h"
+#include "../include/cuckoo_filter.h"
 
-int
-main (int argc, char ** argv) {
+#define ELEMENTS 460000
+int main (void) {
   cuckoo_filter_t  *filter;
   bool              rc;
 
@@ -34,20 +34,22 @@ main (int argc, char ** argv) {
   }
 
   int i;
-  for (i = 0; i < 460000; i++) {
+  for (i = 0; i < ELEMENTS; i++) {
     rc = cuckoo_filter_add(filter, &i, sizeof(i));
     if (CUCKOO_FILTER_OK != rc) {
-      printf("%s/%d: %d\n", __func__, __LINE__, rc);
+      printf("add: %d\n", rc);
     }
   }
-
-  for (i = 0; i < 460000; i++) {
+  for(int j = 1; j < 10; j++) {
+  for (i = 0; i < ELEMENTS; i++) {
     rc = cuckoo_filter_contains(filter, &i, sizeof(i));
     if (CUCKOO_FILTER_OK != rc) {
-      printf("%s/%d: %d %d\n", __func__, __LINE__, rc, i);
+      printf("contains: %d %d\n",  rc, i);
+      return 1;
     }
   }
-  
+  }
+
   rc = cuckoo_filter_free(&filter);
   if (CUCKOO_FILTER_OK != rc) {
     printf("%s/%d: %d\n", __func__, __LINE__, rc);
