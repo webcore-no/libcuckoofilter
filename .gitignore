@@ -2,3 +2,5 @@ test
 test2
 test_pthread
 build/
+.ccls-cache/
+tags
