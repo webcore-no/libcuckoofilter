@@ -1,7 +1,7 @@
 #include <pthread.h>
 #include "../include/cuckoo_filter.h"
 
-#define RANGE 460000
+#define RANGE 10000000
 
 void *add_to_filter(cuckoo_filter_t *filter)
 {
@@ -42,7 +42,7 @@ int main(void)
 	cuckoo_filter_t *filter;
 	bool             rc;
 
-	rc = cuckoo_filter_new(&filter, RANGE * 2, 200, 0);
+	rc = cuckoo_filter_new(&filter, RANGE * 4, 200, 0);
 	if(CUCKOO_FILTER_OK != rc) {
 		printf("%s/%d: %d\n", __func__, __LINE__, rc);
 	}
@@ -61,6 +61,7 @@ int main(void)
 		fprintf(stderr, "Error creating thread\n");
 		return 1;
 	}
+
 	filter_contains_range(filter, 0, RANGE);
 
 	pthread_join(add_thread, NULL);
