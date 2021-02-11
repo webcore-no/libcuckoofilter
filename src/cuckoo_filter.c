@@ -20,7 +20,8 @@ static const char *_cuckoo_errstr[] = {
 	[CUCKOO_FILTER_NOT_FOUND] = "Not found",
 	[CUCKOO_FILTER_FULL] = "full",
 	[CUCKOO_FILTER_ALLOCATION_FAILED] = "allocation failed",
-	[CUCKOO_FILTER_DUP] = "duplicate",
+	[CUCKOO_FILTER_BUSY] = "Filter is busy, retry after some time",
+	[CUCKOO_FILTER_RETRY] = "Retry"
 };
 
 const char *cuckoo_strerr(CUCKOO_FILTER_RETURN errnum)
@@ -28,10 +29,10 @@ const char *cuckoo_strerr(CUCKOO_FILTER_RETURN errnum)
 	return _cuckoo_errstr[errnum];
 }
 
-static inline uint32_t hash(const void *, uint32_t, uint32_t, uint32_t,
+static inline uint32_t hash(const uint8_t *, uint32_t, uint32_t, uint32_t,
 			    uint32_t);
 
-typedef volatile struct {
+typedef struct {
 	uint16_t fingerprint : CUCKOO_FINGERPRINT_SIZE;
 	bool marked : 1;
 } __attribute__((packed, aligned(2))) cuckoo_nest_t;
@@ -49,14 +50,13 @@ typedef struct {
 } cuckoo_result_t;
 
 struct cuckoo_filter_t {
+	atomic_flag is_busy;
 	uint32_t bucket_count;
 	uint32_t nests_per_bucket;
 	uint32_t mask;
 	uint32_t max_kick_attempts;
 	uint32_t seed;
 	uint32_t padding;
-	cuckoo_item_t victim;
-	cuckoo_item_t *last_victim;
 	cuckoo_nest_t bucket[1];
 } __attribute__((packed));
 
@@ -161,7 +161,6 @@ KICK:
 	    CUCKOO_FILTER_OK) {
 		filter->bucket[idy].marked = false;
 		if(ret == CUCKOO_FILTER_RETRY) {
-			//printf("retry_from_parent\n");
 			(*depth)++;
 			goto KICK;
 		}
@@ -172,6 +171,24 @@ KICK:
 
 	return CUCKOO_FILTER_OK;
 }
+
+#ifdef CUCKOO_SHM
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
+#define SHMNAME "CUCKOOFILTERSHM"
+static void *malloc_shm(size_t len) {
+	int fd = shm_open(SHMNAME, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+	if(fd == -1) {
+		return NULL;
+	}
+	if(ftruncate(fd, len) == -1) {
+		return NULL;
+	}
+	return mmap(NULL, len, PROT_WRITE, MAP_SHARED, fd, 0);
+}
+
+#endif
 
 CUCKOO_FILTER_RETURN
 cuckoo_filter_new(cuckoo_filter_t **filter, size_t max_key_count,
@@ -196,18 +213,22 @@ cuckoo_filter_new(cuckoo_filter_t **filter, size_t max_key_count,
 				      (bucket_count * CUCKOO_NESTS_PER_BUCKET *
 				       sizeof(cuckoo_nest_t)));
 
+#ifdef CUCKOO_SHM
+	new_filter = malloc_shm(allocation_in_bytes);
+	memset(new_filter, 0, allocation_in_bytes);
+#else
 	new_filter = calloc(allocation_in_bytes, 1);
+#endif
 	if (!new_filter) {
 		return CUCKOO_FILTER_ALLOCATION_FAILED;
 	}
 
-	new_filter->last_victim = NULL;
-	memset(&new_filter->victim, 0, sizeof(new_filter)->victim);
 	new_filter->bucket_count = bucket_count;
 	new_filter->nests_per_bucket = CUCKOO_NESTS_PER_BUCKET;
 	new_filter->max_kick_attempts = max_kick_attempts;
 	new_filter->seed = seed;
 	new_filter->mask = (uint32_t)((1U << CUCKOO_FINGERPRINT_SIZE) - 1);
+	atomic_flag_clear(&new_filter->is_busy);
 
 	*filter = new_filter;
 
@@ -225,7 +246,7 @@ cuckoo_filter_free(cuckoo_filter_t **filter)
 
 static inline CUCKOO_FILTER_RETURN
 cuckoo_filter_lookup(cuckoo_filter_t *filter, cuckoo_result_t *result,
-		     void *key, size_t key_length_in_bytes)
+		     const uint8_t *key, size_t key_length_in_bytes)
 {
 	uint32_t fingerprint = hash(key, key_length_in_bytes,
 				    filter->bucket_count, 1000, filter->seed);
@@ -266,12 +287,14 @@ cuckoo_filter_lookup(cuckoo_filter_t *filter, cuckoo_result_t *result,
 }
 
 CUCKOO_FILTER_RETURN
-cuckoo_filter_add(cuckoo_filter_t *filter, void *key,
+cuckoo_filter_add(cuckoo_filter_t *filter, const uint8_t *key,
 		  size_t key_length_in_bytes)
 {
-	if (NULL != filter->last_victim) {
-		return CUCKOO_FILTER_FULL;
+	CUCKOO_FILTER_RETURN ret = CUCKOO_FILTER_OK;
+	if(atomic_flag_test_and_set(&filter->is_busy)) {
+		return CUCKOO_FILTER_BUSY;
 	}
+
 	uint32_t fingerprint = hash(key, key_length_in_bytes,
 				    filter->bucket_count, 1000, filter->seed);
 	uint32_t h1 = hash(key, key_length_in_bytes, filter->bucket_count, 0,
@@ -282,20 +305,30 @@ cuckoo_filter_add(cuckoo_filter_t *filter, void *key,
 	if(cuckoo_filter_relocate(filter, fingerprint,
 				  h1, &depth) != CUCKOO_FILTER_OK)
 	{
-		return CUCKOO_FILTER_FULL;
+
+		ret = CUCKOO_FILTER_FULL;
+		goto RET;
 	}
+RET:
+	atomic_flag_clear(&filter->is_busy);
+	return ret;
 }
 
 CUCKOO_FILTER_RETURN
-cuckoo_filter_remove(cuckoo_filter_t *filter, void *key,
+cuckoo_filter_remove(cuckoo_filter_t *filter, const uint8_t *key,
 		     size_t key_length_in_bytes)
 {
+	CUCKOO_FILTER_RETURN ret = CUCKOO_FILTER_OK;
+	if(atomic_flag_test_and_set(&filter->is_busy)) {
+		return CUCKOO_FILTER_BUSY;
+	}
 	cuckoo_result_t result;
 	bool was_deleted = false;
 
 	cuckoo_filter_lookup(filter, &result, key, key_length_in_bytes);
 	if (false == result.was_found) {
-		return CUCKOO_FILTER_NOT_FOUND;
+		ret = CUCKOO_FILTER_NOT_FOUND;
+		goto RET;
 	}
 
 	if (CUCKOO_FILTER_OK ==
@@ -308,22 +341,22 @@ cuckoo_filter_remove(cuckoo_filter_t *filter, void *key,
 		was_deleted = true;
 	}
 
-	if ((true == was_deleted) & (NULL != filter->last_victim)) {
-	}
-
-	return ((true == was_deleted) ? CUCKOO_FILTER_OK :
+	ret = ((true == was_deleted) ? CUCKOO_FILTER_OK :
 					      CUCKOO_FILTER_NOT_FOUND);
+RET:
+	atomic_flag_clear(&filter->is_busy);
+	return ret;
 }
 
 CUCKOO_FILTER_RETURN
-cuckoo_filter_contains(cuckoo_filter_t *filter, void *key,
+cuckoo_filter_contains(cuckoo_filter_t *filter, const uint8_t *key,
 		       size_t key_length_in_bytes)
 {
 	cuckoo_result_t result;
 	return cuckoo_filter_lookup(filter, &result, key, key_length_in_bytes);
 }
 
-static inline uint32_t hash(const void *key, uint32_t key_length_in_bytes,
+static inline uint32_t hash(const const uint8_t *key, uint32_t key_length_in_bytes,
 			    uint32_t size, uint32_t n, uint32_t seed)
 {
 	uint32_t h1 = XXH3_64bits_withSeed(key, key_length_in_bytes, seed);

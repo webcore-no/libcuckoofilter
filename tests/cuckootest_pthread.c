@@ -1,4 +1,5 @@
 #include <pthread.h>
+#include <unistd.h>
 #include "../include/cuckoo_filter.h"
 
 #define RANGE 10000000
@@ -7,11 +8,14 @@ void *add_to_filter(cuckoo_filter_t *filter)
 {
 	int i, rc;
 	int dups;
+	pid_t pid = getpid();
 	for(i = RANGE; i < RANGE * 2; i++) {
 		if((rc = cuckoo_filter_add(filter, &i, sizeof(i)))) {
-			printf("[ERROR][%s]: %d\n", cuckoo_strerr(rc), i);
+			printf("[%d][ERROR][%s]: %d\n", pid, cuckoo_strerr(rc), i);
+			sleep(1);
+			i--;
 		}
-		if(i % (RANGE / 100) == 0) { printf("adding %d\n", i); }
+		if(i % (RANGE / 100) == 0) { printf("[%d]adding %d\n", pid, i); }
 	}
         return NULL;
 }
@@ -56,11 +60,17 @@ int main(void)
 		}
 	}
 	pthread_t add_thread;
+	pthread_t add_thread2;
 	// Spawn a pthread to add more elements we dont care about
 	if(pthread_create(&add_thread, NULL, add_to_filter, filter)) {
 		fprintf(stderr, "Error creating thread\n");
 		return 1;
 	}
+	if(pthread_create(&add_thread2, NULL, add_to_filter, filter)) {
+		fprintf(stderr, "Error creating thread\n");
+		return 1;
+	}
+
 
 	filter_contains_range(filter, 0, RANGE);
 

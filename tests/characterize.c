@@ -45,9 +45,6 @@ sample_t *insert_until_full(int elements, int depth, int sample_rate)
 	for (i = 0;; i++) {
 		char *d = random_string();
 		ret = cuckoo_filter_add(filter, d, strlen(d));
-		if (ret == CUCKOO_FILTER_DUP) {
-			dupes++;
-		}
 		if (ret == CUCKOO_FILTER_FULL) {
 			head->dupes = dupes;
 			head->elements = i;

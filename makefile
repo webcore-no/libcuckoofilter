@@ -4,7 +4,7 @@ PREFIX=/usr
 
 
 CC = gcc
-CFLAGS = -Wall -Wextra -std=gnu99  -O2 -g -I include -fPIC -lpthread -pthread -DCUCKOO_FINGERPRINT_SIZE=$(FINGERPRINT_SIZE) -DCUCKOO_NESTS_PER_BUCKET=$(NESTS_PER_BUCKET)
+CFLAGS = -Wall -Wextra -std=gnu99  -O2 -g -I include -fPIC -lpthread -lrt -pthread -DCUCKOO_FINGERPRINT_SIZE=$(FINGERPRINT_SIZE) -DCUCKOO_NESTS_PER_BUCKET=$(NESTS_PER_BUCKET) -DCUCKOO_SHM
 
 
 SOURCE := $(wildcard src/*.c)
@@ -36,6 +36,6 @@ build/%.o: src/%.c build
 	$(CC) $(CFLAGS) -c $< -o $@
 
 install: build/libcuckoofilter.so build/libcuckoofilter.a
-	install -s build/libcuckoofilter.so $(PREFIX)/lib
-	install -s build/libcuckoofilter.a $(PREFIX)/lib
+	install build/libcuckoofilter.so $(PREFIX)/lib
+	install build/libcuckoofilter.a $(PREFIX)/lib
 	install include/* $(PREFIX)/include
