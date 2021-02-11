@@ -106,55 +106,6 @@ remove_fingerprint_from_bucket(cuckoo_filter_t *filter, uint32_t fp, uint32_t h)
 
 static inline CUCKOO_FILTER_RETURN
 cuckoo_filter_relocate(cuckoo_filter_t *filter, uint32_t fingerprint,
-		       uint32_t h1, uint32_t depth)
-{
-	uint32_t h2 = ((h1 ^ hash(&fingerprint, sizeof(fingerprint),
-				  filter->bucket_count, 900, filter->seed)) %
-		       filter->bucket_count);
-
-	if (CUCKOO_FILTER_OK ==
-	    add_fingerprint_to_bucket(filter, fingerprint, h1)) {
-		return CUCKOO_FILTER_OK;
-	}
-
-	if (CUCKOO_FILTER_OK ==
-	    add_fingerprint_to_bucket(filter, fingerprint, h2)) {
-		return CUCKOO_FILTER_OK;
-	}
-
-KICK:
-	if (filter->max_kick_attempts == depth) {
-		return CUCKOO_FILTER_FULL;
-	}
-
-	// Randomly select a hash
-	size_t row = (0 == (rand() % 2) ? h1 : h2);
-
-	// Randomly select a nest
-	size_t col = (rand() % filter->nests_per_bucket);
-
-	size_t idx = (row * filter->nests_per_bucket) + col;
-	if (filter->bucket[idx].marked) {
-		depth++;
-		goto KICK;
-	}
-
-	size_t elem = filter->bucket[idx].fingerprint;
-	filter->bucket[idx].marked = true;
-
-	if (cuckoo_filter_relocate(filter, elem, row, (depth + 1)) !=
-	    CUCKOO_FILTER_OK) {
-		filter->bucket[idx].marked = false;
-		return CUCKOO_FILTER_FULL;
-	}
-	filter->bucket[idx].marked = false;
-	filter->bucket[idx].fingerprint = fingerprint;
-
-	return CUCKOO_FILTER_OK;
-}
-
-static inline CUCKOO_FILTER_RETURN
-cuckoo_filter_relocate_alt1(cuckoo_filter_t *filter, uint32_t fingerprint,
 		       uint32_t h1, uint32_t *depth)
 {
 	uint32_t h2 = ((h1 ^ hash(&fingerprint, sizeof(fingerprint),
@@ -206,7 +157,7 @@ KICK:
 	filter->bucket[idy].marked = true;
 
 	CUCKOO_FILTER_RETURN ret;
-	if ((ret = cuckoo_filter_relocate_alt1(filter, elem, row, depth)) !=
+	if ((ret = cuckoo_filter_relocate(filter, elem, row, depth)) !=
 	    CUCKOO_FILTER_OK) {
 		filter->bucket[idy].marked = false;
 		if(ret == CUCKOO_FILTER_RETRY) {
@@ -328,7 +279,7 @@ cuckoo_filter_add(cuckoo_filter_t *filter, void *key,
 	uint32_t depth = 0;
 	fingerprint &= filter->mask;
 	fingerprint += !fingerprint;
-	if(cuckoo_filter_relocate_alt1(filter, fingerprint,
+	if(cuckoo_filter_relocate(filter, fingerprint,
 				  h1, &depth) != CUCKOO_FILTER_OK)
 	{
 		return CUCKOO_FILTER_FULL;
