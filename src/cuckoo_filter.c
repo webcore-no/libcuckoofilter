@@ -1,12 +1,19 @@
 #include "../include/cuckoo_filter.h"
+#define XXH_STATIC_LINKING_ONLY   /* access advanced declarations */
+#define XXH_IMPLEMENTATION   /* access definitions */
+#define XXH_INLINE_ALL
+#include "xxhash.h"
 #include <stdatomic.h>
 #include <stdint.h>
 #include <string.h>
 
+#ifndef CUCKOO_NESTS_PER_BUCKET
 #define CUCKOO_NESTS_PER_BUCKET 4
-
+#endif
 //Should be 8 * n - 1
+#ifndef CUCKOO_FINGERPRINT_SIZE
 #define CUCKOO_FINGERPRINT_SIZE 15
+#endif
 
 static const char *_cuckoo_errstr[] = {
 	[CUCKOO_FILTER_OK] = "OK",
@@ -141,7 +148,76 @@ KICK:
 		filter->bucket[idx].marked = false;
 		return CUCKOO_FILTER_FULL;
 	}
-	filter->bucket[idx].marked = !filter->bucket[idx].marked;
+	filter->bucket[idx].marked = false;
+	filter->bucket[idx].fingerprint = fingerprint;
+
+	return CUCKOO_FILTER_OK;
+}
+
+static inline CUCKOO_FILTER_RETURN
+cuckoo_filter_relocate_alt1(cuckoo_filter_t *filter, uint32_t fingerprint,
+		       uint32_t h1, uint32_t *depth)
+{
+	uint32_t h2 = ((h1 ^ hash(&fingerprint, sizeof(fingerprint),
+				  filter->bucket_count, 900, filter->seed)) %
+		       filter->bucket_count);
+
+	if (CUCKOO_FILTER_OK ==
+	    add_fingerprint_to_bucket(filter, fingerprint, h1)) {
+		return CUCKOO_FILTER_OK;
+	}
+
+	if (CUCKOO_FILTER_OK ==
+	    add_fingerprint_to_bucket(filter, fingerprint, h2)) {
+		return CUCKOO_FILTER_OK;
+	}
+
+	bool done_trying = false;
+	bool hash_table = (rand() % 2);
+	size_t start_col = rand() % filter->nests_per_bucket;
+	size_t col = start_col;
+KICK:
+
+	if (filter->max_kick_attempts == *depth) {
+		return CUCKOO_FILTER_FULL;
+	}
+
+	// Select next nest
+	col++;
+	col = col % filter->nests_per_bucket;
+
+	if(col == start_col) {
+		if(done_trying) {
+			return CUCKOO_FILTER_RETRY;
+		}
+		hash_table = !hash_table;
+		done_trying = true;
+	}
+
+	size_t row = hash_table ? h1 : h2;
+
+
+	size_t idy = (row * filter->nests_per_bucket);
+	size_t idx = (row * filter->nests_per_bucket) + col;
+	if (filter->bucket[idy].marked) {
+		return CUCKOO_FILTER_RETRY;
+	}
+
+	size_t elem = filter->bucket[idx].fingerprint;
+	filter->bucket[idy].marked = true;
+
+	CUCKOO_FILTER_RETURN ret;
+	if ((ret = cuckoo_filter_relocate_alt1(filter, elem, row, depth)) !=
+	    CUCKOO_FILTER_OK) {
+		filter->bucket[idy].marked = false;
+		if(ret == CUCKOO_FILTER_RETRY) {
+			//printf("retry_from_parent\n");
+			(*depth)++;
+			goto KICK;
+		}
+		return CUCKOO_FILTER_FULL;
+	}
+	filter->bucket[idy].marked = false;
 	filter->bucket[idx].fingerprint = fingerprint;
 
 	return CUCKOO_FILTER_OK;
@@ -243,17 +319,21 @@ CUCKOO_FILTER_RETURN
 cuckoo_filter_add(cuckoo_filter_t *filter, void *key,
 		  size_t key_length_in_bytes)
 {
-	cuckoo_result_t result;
-	cuckoo_filter_lookup(filter, &result, key, key_length_in_bytes);
-	if (true == result.was_found) {
-		return CUCKOO_FILTER_DUP;
-	}
-
 	if (NULL != filter->last_victim) {
 		return CUCKOO_FILTER_FULL;
 	}
-	return cuckoo_filter_relocate(filter, result.item.fingerprint,
-				  result.item.h1, 0);
+	uint32_t fingerprint = hash(key, key_length_in_bytes,
+				    filter->bucket_count, 1000, filter->seed);
+	uint32_t h1 = hash(key, key_length_in_bytes, filter->bucket_count, 0,
+			   filter->seed);
+	uint32_t depth = 0;
+	fingerprint &= filter->mask;
+	fingerprint += !fingerprint;
+	if(cuckoo_filter_relocate_alt1(filter, fingerprint,
+				  h1, &depth) != CUCKOO_FILTER_OK)
+	{
+		return CUCKOO_FILTER_FULL;
+	}
 }
 
 CUCKOO_FILTER_RETURN
@@ -352,8 +432,8 @@ static inline uint32_t murmurhash(const void *key, uint32_t key_length_in_bytes,
 static inline uint32_t hash(const void *key, uint32_t key_length_in_bytes,
 			    uint32_t size, uint32_t n, uint32_t seed)
 {
-	uint32_t h1 = murmurhash(key, key_length_in_bytes, seed);
-	uint32_t h2 = murmurhash(key, key_length_in_bytes, h1);
+	uint32_t h1 = XXH3_64bits_withSeed(key, key_length_in_bytes, seed);
+	uint32_t h2 = XXH3_64bits_withSeed(key, key_length_in_bytes, h1);
 
 	return ((h1 + (n * h2)) % size);
 }

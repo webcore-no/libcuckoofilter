@@ -64,7 +64,7 @@ int main(void)
 	filter_contains_range(filter, 0, RANGE);
 
 	pthread_join(add_thread, NULL);
-	filter_contains_range(filter, RANGE, RANGE);
+	//filter_contains_range(filter, RANGE, RANGE);
 	rc = cuckoo_filter_free(&filter);
 	if(CUCKOO_FILTER_OK != rc) {
 		printf("%s/%d: %d\n", __func__, __LINE__, rc);

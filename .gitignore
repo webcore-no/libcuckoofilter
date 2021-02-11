@@ -1,6 +1,7 @@
-test
-test2
-test_pthread
+tests/characterize
+tests/cuckootest2
+tests/cuckootest
+tests/cuckootest_pthread
 build/
 .ccls-cache/
 tags
