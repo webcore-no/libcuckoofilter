@@ -108,7 +108,7 @@ static inline CUCKOO_FILTER_RETURN
 cuckoo_filter_relocate(cuckoo_filter_t *filter, uint32_t fingerprint,
 		       uint32_t h1, uint32_t *depth)
 {
-	uint32_t h2 = ((h1 ^ hash(&fingerprint, sizeof(fingerprint),
+	uint32_t h2 = ((h1 ^ hash((const uint8_t *)&fingerprint, sizeof(fingerprint),
 				  filter->bucket_count, 900, filter->seed)) %
 		       filter->bucket_count);
 
@@ -176,6 +176,7 @@ KICK:
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <unistd.h>
 #define SHMNAME "CUCKOOFILTERSHM"
 static void *malloc_shm(size_t len) {
 	int fd = shm_open(SHMNAME, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
@@ -255,7 +256,7 @@ cuckoo_filter_lookup(cuckoo_filter_t *filter, cuckoo_result_t *result,
 
 	fingerprint &= filter->mask;
 	fingerprint += !fingerprint;
-	uint32_t h2 = ((h1 ^ hash(&fingerprint, sizeof(fingerprint),
+	uint32_t h2 = ((h1 ^ hash((const uint8_t *)&fingerprint, sizeof(fingerprint),
 				  filter->bucket_count, 900, filter->seed)) %
 		       filter->bucket_count);
 
@@ -356,7 +357,7 @@ cuckoo_filter_contains(cuckoo_filter_t *filter, const uint8_t *key,
 	return cuckoo_filter_lookup(filter, &result, key, key_length_in_bytes);
 }
 
-static inline uint32_t hash(const const uint8_t *key, uint32_t key_length_in_bytes,
+static inline uint32_t hash(const uint8_t *key, uint32_t key_length_in_bytes,
 			    uint32_t size, uint32_t n, uint32_t seed)
 {
 	uint32_t h1 = XXH3_64bits_withSeed(key, key_length_in_bytes, seed);
