@@ -24,7 +24,11 @@ cuckoo_filter_new(cuckoo_filter_t **filter, size_t max_key_count,
 		  size_t max_kick_attempts, uint32_t seed);
 
 CUCKOO_FILTER_RETURN
-cuckoo_filter_free(cuckoo_filter_t **filter);
+cuckoo_filter_shm_new(const char *name, cuckoo_filter_t **filter,
+		      size_t max_key_count, size_t max_kick_attempts,
+		      uint32_t seed);
+
+CUCKOO_FILTER_RETURN cuckoo_filter_free(cuckoo_filter_t **filter);
 
 CUCKOO_FILTER_RETURN
 cuckoo_filter_add(cuckoo_filter_t *filter, const uint8_t *key,
@@ -33,6 +37,14 @@ cuckoo_filter_add(cuckoo_filter_t *filter, const uint8_t *key,
 CUCKOO_FILTER_RETURN
 cuckoo_filter_remove(cuckoo_filter_t *filter, const uint8_t *key,
 		     size_t key_length_in_bytes);
+
+CUCKOO_FILTER_RETURN
+cuckoo_filter_blocking_add(cuckoo_filter_t *filter, const uint8_t *key,
+			   size_t key_length_in_bytes);
+
+CUCKOO_FILTER_RETURN
+cuckoo_filter_blocking_remove(cuckoo_filter_t *filter, const uint8_t *key,
+			      size_t key_length_in_bytes);
 
 CUCKOO_FILTER_RETURN
 cuckoo_filter_contains(cuckoo_filter_t *filter, const uint8_t *key,

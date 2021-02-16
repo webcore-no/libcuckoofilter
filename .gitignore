@@ -2,6 +2,7 @@ tests/characterize
 tests/cuckootest2
 tests/cuckootest
 tests/cuckootest_pthread
+tests/tests
 build/
 .ccls-cache/
 tags

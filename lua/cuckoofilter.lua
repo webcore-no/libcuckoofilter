@@ -1,4 +1,5 @@
 local ffi = require("ffi")
+
 ffi.cdef[[
 typedef enum {
   CUCKOO_FILTER_OK = 0,
@@ -8,7 +9,6 @@ typedef enum {
   CUCKOO_FILTER_BUSY,
   CUCKOO_FILTER_RETRY,
 } CUCKOO_FILTER_RETURN;
-
 
 typedef struct cuckoo_filter_t cuckoo_filter_t;
 
@@ -28,59 +28,64 @@ cuckoo_filter_free (
 CUCKOO_FILTER_RETURN
 cuckoo_filter_add (
   cuckoo_filter_t      *filter,
-  const char                 *key,
+  const char           *key,
   size_t                key_length_in_bytes
 );
 
 CUCKOO_FILTER_RETURN
 cuckoo_filter_remove (
   cuckoo_filter_t      *filter,
-  const char                 *key,
+  const char           *key,
   size_t                key_length_in_bytes
 );
 
 CUCKOO_FILTER_RETURN
 cuckoo_filter_contains (
   cuckoo_filter_t      *filter,
-  const char                 *key,
+  const char           *key,
   size_t                key_length_in_bytes
 );
 const char *
 cuckoo_strerr (CUCKOO_FILTER_RETURN);
 ]]
-local cuckoo = ffi.load("libcuckoofilter")
 
-local _M = {}
-local _MT = {__index=_M}
+local C = ffi.load("../build/libcuckoofilter.so")
 
-function _M.new(size, depth, seed)
-                local filter = ffi.new("cuckoo_filter_t *[1]", cuckoo)
-                local err = cuckoo.cuckoo_filter_new(filter, size, depth, seed or 0);
-                if tonumber(err) ~= 0 then
-                                return nil, "Failed to make filter"
-                end
-                local tbl = {
-                                filter = filter
-                }
-                setmetatable(tbl, _MT)
-                return tbl
+local cuckoo_filter_t = ffi.typeof("cuckoo_filter_t *[1]")
+
+local string_check = function(filter, func, element)
+    if type(element) ~= "string" then
+        return nil, "element must be string type"
+    end
+
+    return func(filter, element, #element) == 0
 end
 
-function _M:add(element)
-               if tonumber(cuckoo.cuckoo_filter_add(self.filter[0], element, #element)) == 0 then
-                                return true
-                end
-                return nil, "Failed to add element"
-end
+return function(size, depth, seed)
+    if not type(size) == "number" or size < 0 then
+        return nil, "size must be a positive number"
+    end
 
-function _M:remove(element)
-                if tonumber(cuckoo.cuckoo_filter_remove(self.filter[0], element, #element)) == 0 then
-                                return true
-                end
-                return nil, "Failed to remove element"
-end
+    if depth ~= nil and (type(depth) ~= "number" or depth < 0) then
+        return nil, "depth must be a positive number"
+    end
 
-function _M:contains(element)
-                return tonumber(cuckoo.cuckoo_filter_contains(self.filter[0], element, #element)) == 0
+    local filter = cuckoo_filter_t()
+    if C.cuckoo_filter_new(filter, size, depth or 100, seed or 0) ~= 0 then
+        return nil, "failed to initialize filter"
+    end
+
+    ffi.gc(filter, C.cuckoo_filter_free)
+
+    return {
+        add = function(element)
+            return string_check(filter[0], C.cuckoo_filter_add, element)
+        end,
+        remove = function(element)
+            return string_check(filter[0], C.cuckoo_filter_remove, element)
+        end,
+        contains = function(element)
+            return string_check(filter[0], C.cuckoo_filter_contains, element)
+        end
+    }
 end
-return _M

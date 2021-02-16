@@ -2,9 +2,8 @@ FINGERPRINT_SIZE=15
 NESTS_PER_BUCKET=4
 PREFIX=/usr
 
-
 CC = gcc
-CFLAGS = -Wall -Wextra -std=gnu99  -O2 -g -I include -fPIC -lpthread -lrt -pthread -DCUCKOO_FINGERPRINT_SIZE=$(FINGERPRINT_SIZE) -DCUCKOO_NESTS_PER_BUCKET=$(NESTS_PER_BUCKET) -DCUCKOO_SHM
+CFLAGS = -Wall -Wextra -std=gnu99  -O2 -g -I include -fPIC -lpthread -pthread -lrt -DCUCKOO_FINGERPRINT_SIZE=$(FINGERPRINT_SIZE) -DCUCKOO_NESTS_PER_BUCKET=$(NESTS_PER_BUCKET) -DCUCKOO_SHM
 
 
 SOURCE := $(wildcard src/*.c)
@@ -18,7 +17,7 @@ all: build/libcuckoofilter.so build/libcuckoofilter.a
 tests: $(TESTS)
 
 tests/%: $(OBJECTS) tests/%.c
-	$(CC) $(CFLAGS) $^ -o $@
+	$(CC) $(CFLAGS) -lcheck $^ -o $@
 
 build/libcuckoofilter.so: $(OBJECTS)
 	$(CC) $(CFLAGS) -shared $^ -o $@
