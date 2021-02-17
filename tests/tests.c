@@ -2,6 +2,7 @@
 #include <check.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 
@@ -137,7 +138,7 @@ FCK_SHM_START(test_cuckoofilter_forked_add)
 		for(int i = 0; i < 10000; i++) {
 			FCK_PCONTAINS(&i);
 		}
-		waitpid(pid, NULL);
+		waitpid(pid, NULL, 0);
 		// Read values child added
 		for(int i = 10000; i < 20000; i++) {
 			FCK_PCONTAINS(&i);
@@ -146,7 +147,7 @@ FCK_SHM_START(test_cuckoofilter_forked_add)
 		// Child
 		// Write some values and exit
 		for(int i = 10000; i < 20000; i++) {
-			cuckoo_filter_add(filter, &i, sizeof(i));
+			cuckoo_filter_add(filter, (const uint8_t *)&i, sizeof(i));
 		}
 		exit(0);
 	}
@@ -167,7 +168,7 @@ FCK_SHM_START(test_cuckoofilter_forked_remove)
 		for(int i = 0; i < 10000; i++) {
 			FCK_PCONTAINS(&i);
 		}
-		waitpid(pid, NULL);
+		waitpid(pid, NULL, 0);
 		// Read values child added
 		for(int i = 10000; i < 20000; i++) {
 			FCK_PEXCLUDES(&i);
@@ -176,7 +177,7 @@ FCK_SHM_START(test_cuckoofilter_forked_remove)
 		// Child
 		// Write some values and exit
 		for(int i = 10000; i < 20000; i++) {
-			cuckoo_filter_remove(filter, &i, sizeof(i));
+			cuckoo_filter_remove(filter, (const uint8_t *)&i, sizeof(i));
 		}
 		exit(0);
 	}
@@ -196,7 +197,7 @@ FCK_SHM_START(test_cuckoofilter_forked_remove_and_add)
 		for(int i = 0; i < 10000; i++) {
 			FCK_PCONTAINS(&i);
 		}
-		waitpid(pid, NULL);
+		waitpid(pid, NULL, 0);
 		for(int i = 0; i < 10000; i++) {
 			FCK_PCONTAINS(&i);
 		}
@@ -206,13 +207,13 @@ FCK_SHM_START(test_cuckoofilter_forked_remove_and_add)
 		for(int i = 10000; i < 20000; i++) {
 			int j = rand()%10000 + 10000;
 			if(rand()%2) {
-				cuckoo_filter_blocking_add(filter, &j, sizeof(j));
+				cuckoo_filter_blocking_add(filter, (const uint8_t *)&j, sizeof(j));
 			} else {
-				cuckoo_filter_blocking_remove(filter, &j, sizeof(j));
+				cuckoo_filter_blocking_remove(filter, (const uint8_t *)&j, sizeof(j));
 			}
 		}
 		if(pid) {
-			waitpid(pid, NULL);
+			waitpid(pid, NULL, 0);
 		}
 		exit(0);
 	}

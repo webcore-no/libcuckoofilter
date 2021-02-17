@@ -41,9 +41,9 @@ void worker_loop()
 	}
 }
 
-void handle_sighup(int signal) {
+void handle_sighup(int __attribute__((unused)) signal) {
 	// Write total ammount off operations and exit
-	size_t wr = write(globals.parent_fd, &globals.op_counter, sizeof(uint32_t));
+	ssize_t wr = write(globals.parent_fd, &globals.op_counter, sizeof(uint32_t));
 	if(wr == -1) {
 		printf("%d:%s\n", errno, strerror(errno));
 	}
@@ -93,7 +93,7 @@ int create_worker(worker *wrk)
 #define wc 24
 int main(void)
 {
-	if(signal(SIGHUP, &handle_sighup) == -1) {
+	if(signal(SIGHUP, &handle_sighup) == SIG_ERR) {
 		printf("ERROR[%d]:%s\n", errno, strerror(errno));
 		exit(1);
 	}
