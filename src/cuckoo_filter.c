@@ -444,7 +444,7 @@ cuckoo_filter_blocking_remove(cuckoo_filter_t *filter, const uint8_t *key,
 			      size_t key_bytelen)
 {
 	if (filter->semid) {
-		if (sem_trywait(filter->semid)) {
+		if (sem_wait(filter->semid)) {
 			return CUCKOO_FILTER_BUSY;
 		}
 	}
@@ -465,7 +465,7 @@ cuckoo_filter_remove(cuckoo_filter_t *filter, const uint8_t *key,
 		     size_t key_bytelen)
 {
 	if (filter->semid) {
-		if (sem_wait(filter->semid)) {
+		if (sem_trywait(filter->semid)) {
 			return CUCKOO_FILTER_BUSY;
 		}
 	}
