@@ -242,7 +242,6 @@ cuckoo_filter_shm_new(const char *name, cuckoo_filter_t **filter,
 		cuckoo_filter_free(&new_filter);
 		return CUCKOO_FILTER_SEMERR;
 	}
-	sem_post(new_filter->semid);
 	*filter = new_filter;
 
 	return CUCKOO_FILTER_OK;
@@ -487,6 +486,24 @@ cuckoo_filter_contains(cuckoo_filter_t *filter, const uint8_t *key,
 {
 	cuckoo_result_t result;
 	return cuckoo_filter_lookup(filter, &result, key, key_bytelen);
+}
+CUCKOO_FILTER_RETURN
+cuckoo_filter_lock(cuckoo_filter_t *filter) {
+	if (filter->semid) {
+		if (sem_wait(filter->semid)) {
+			return CUCKOO_FILTER_BUSY;
+		}
+	}
+	return CUCKOO_FILTER_OK;
+}
+CUCKOO_FILTER_RETURN
+cuckoo_filter_unlock(cuckoo_filter_t *filter) {
+	if (filter->semid) {
+		if (sem_post(filter->semid)) {
+			return CUCKOO_FILTER_BUSY;
+		}
+	}
+	return CUCKOO_FILTER_OK;
 }
 
 static inline uint32_t hash(const uint8_t *key, uint32_t key_bytelen,

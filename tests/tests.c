@@ -221,6 +221,20 @@ FCK_SHM_START(test_cuckoofilter_forked_remove_and_add)
 FCK_END
 
 
+#include <semaphore.h>
+FCK_SHM_START(test_cuckoofilter_shm_locking)
+{
+	int j = 1000;
+	cuckoo_filter_lock(filter);
+	ret = cuckoo_filter_add(filter, (const uint8_t *)&j, sizeof(j));
+	ck_assert_int_eq(ret, CUCKOO_FILTER_BUSY);
+	ret = cuckoo_filter_remove(filter, (const uint8_t *)&j, sizeof(j));
+	ck_assert_int_eq(ret, CUCKOO_FILTER_BUSY);
+	cuckoo_filter_unlock(filter);
+}
+FCK_END
+
+
 Suite *cuckoofilter_suite(void)
 {
 	Suite *s;
@@ -243,6 +257,7 @@ Suite *cuckoofilter_suite(void)
 	tcase_add_test(tc_shm, test_cuckoofilter_forked_add);
 	tcase_add_test(tc_shm, test_cuckoofilter_forked_remove);
 	tcase_add_test(tc_shm, test_cuckoofilter_forked_remove_and_add);
+	tcase_add_test(tc_shm, test_cuckoofilter_shm_locking);
 	suite_add_tcase(s, tc_shm);
 	return s;
 }
