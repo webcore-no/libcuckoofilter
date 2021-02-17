@@ -1,7 +1,4 @@
-tests/characterize
-tests/cuckootest2
-tests/cuckootest
-tests/cuckootest_pthread
+tests/benchmark
 tests/tests
 build/
 .ccls-cache/

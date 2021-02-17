@@ -4,6 +4,7 @@
 #define XXH_INLINE_ALL
 #include "xxhash.h"
 #include <stdatomic.h>
+#include <errno.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <string.h>
@@ -60,7 +61,6 @@ struct cuckoo_filter_t {
 	uint32_t fd;
 	sem_t *semid;
 	uint32_t bucket_count;
-	uint32_t nests_per_bucket;
 	uint32_t mask;
 	uint32_t max_kick_attempts;
 	uint32_t seed;
@@ -87,10 +87,10 @@ static inline size_t next_power_of_two(size_t x)
 static inline CUCKOO_FILTER_RETURN
 add_fingerprint_to_bucket(cuckoo_filter_t *filter, uint32_t fp, uint32_t h)
 {
-	for (size_t ii = 0; ii < filter->nests_per_bucket; ++ii) {
-		if (0 == filter->bucket[(h * filter->nests_per_bucket) + ii]
+	for (size_t ii = 0; ii < CUCKOO_NESTS_PER_BUCKET; ++ii) {
+		if (0 == filter->bucket[(h * CUCKOO_NESTS_PER_BUCKET) + ii]
 				 .fingerprint) {
-			filter->bucket[(h * filter->nests_per_bucket) + ii]
+			filter->bucket[(h * CUCKOO_NESTS_PER_BUCKET) + ii]
 				.fingerprint = fp;
 			return CUCKOO_FILTER_OK;
 		}
@@ -103,10 +103,10 @@ add_fingerprint_to_bucket(cuckoo_filter_t *filter, uint32_t fp, uint32_t h)
 static inline CUCKOO_FILTER_RETURN
 remove_fingerprint_from_bucket(cuckoo_filter_t *filter, uint32_t fp, uint32_t h)
 {
-	for (size_t ii = 0; ii < filter->nests_per_bucket; ++ii) {
-		if (fp == filter->bucket[(h * filter->nests_per_bucket) + ii]
+	for (size_t ii = 0; ii < CUCKOO_NESTS_PER_BUCKET; ++ii) {
+		if (fp == filter->bucket[(h * CUCKOO_NESTS_PER_BUCKET) + ii]
 				  .fingerprint) {
-			filter->bucket[(h * filter->nests_per_bucket) + ii]
+			filter->bucket[(h * CUCKOO_NESTS_PER_BUCKET) + ii]
 				.fingerprint = 0;
 			return CUCKOO_FILTER_OK;
 		}
@@ -137,7 +137,7 @@ cuckoo_filter_relocate(cuckoo_filter_t *filter, uint32_t fingerprint,
 
 	bool done_trying = false;
 	bool hash_table = (rand() % 2);
-	size_t start_col = rand() % filter->nests_per_bucket;
+	size_t start_col = rand() % CUCKOO_NESTS_PER_BUCKET;
 	size_t col = start_col;
 KICK:
 
@@ -147,7 +147,7 @@ KICK:
 
 	// Select next nest
 	col++;
-	col = col % filter->nests_per_bucket;
+	col = col % CUCKOO_NESTS_PER_BUCKET;
 
 	if (col == start_col) {
 		if (done_trying) {
@@ -159,8 +159,8 @@ KICK:
 
 	size_t row = hash_table ? h1 : h2;
 
-	size_t idy = (row * filter->nests_per_bucket);
-	size_t idx = (row * filter->nests_per_bucket) + col;
+	size_t idy = (row * CUCKOO_NESTS_PER_BUCKET);
+	size_t idx = (row * CUCKOO_NESTS_PER_BUCKET) + col;
 	if (filter->bucket[idy].marked) {
 		return CUCKOO_FILTER_RETRY;
 	}
@@ -231,16 +231,18 @@ cuckoo_filter_shm_new(const char *name, cuckoo_filter_t **filter,
 	new_filter->fd = fd;
 
 	new_filter->bucket_count = bucket_count;
-	new_filter->nests_per_bucket = CUCKOO_NESTS_PER_BUCKET;
 	new_filter->max_kick_attempts = max_kick_attempts;
 	new_filter->seed = seed;
 	new_filter->mask = (uint32_t)((1U << CUCKOO_FINGERPRINT_SIZE) - 1);
-	new_filter->semid = sem_open(name, O_CREAT | O_EXCL);
-	if(new_filter->semid == SEM_FAILED) {
+	new_filter->semid = sem_open(name, O_CREAT,
+				     S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH, 1);
+	if (new_filter->semid == SEM_FAILED) {
+		printf("%s:%d:%s\n", name, errno, strerror(errno));
+		new_filter->semid = NULL;
 		cuckoo_filter_free(&new_filter);
-		return CUCKOO_FILTER_ALLOCATION_FAILED;
+		return CUCKOO_FILTER_SEMERR;
 	}
-
+	sem_post(new_filter->semid);
 	*filter = new_filter;
 
 	return CUCKOO_FILTER_OK;
@@ -277,7 +279,6 @@ cuckoo_filter_new(cuckoo_filter_t **filter, size_t max_key_count,
 	new_filter->name = NULL;
 
 	new_filter->bucket_count = bucket_count;
-	new_filter->nests_per_bucket = CUCKOO_NESTS_PER_BUCKET;
 	new_filter->max_kick_attempts = max_kick_attempts;
 	new_filter->seed = seed;
 	new_filter->mask = (uint32_t)((1U << CUCKOO_FINGERPRINT_SIZE) - 1);
@@ -293,6 +294,13 @@ cuckoo_filter_free(cuckoo_filter_t **filter)
 {
 	if ((*filter)->name) {
 		close((*filter)->fd);
+		if ((*filter)->semid) {
+			sem_close((*filter)->semid);
+			if (sem_unlink((*filter)->name)) {
+				printf("(%s)%d:%s\n", (*filter)->name, errno,
+				       strerror(errno));
+			}
+		}
 		shm_unlink((*filter)->name);
 	} else {
 		free(*filter);
@@ -307,32 +315,32 @@ static inline CUCKOO_FILTER_RETURN cuckoo_filter_lookup(cuckoo_filter_t *filter,
 							const uint8_t *key,
 							size_t key_bytelen)
 {
-	uint32_t fingerprint = hash(key, key_bytelen, filter->bucket_count,
-				    1000, filter->seed);
-	uint32_t h1 =
-		hash(key, key_bytelen, filter->bucket_count, 0, filter->seed);
+	uint32_t _h1 = XXH3_64bits_withSeed(key, key_bytelen, filter->seed);
+	uint32_t _h2 = XXH3_64bits_withSeed(key, key_bytelen, _h1);
 
+	uint32_t fingerprint = (_h1 + (1000 * _h2)) % filter->bucket_count;
 	fingerprint &= filter->mask;
 	fingerprint += !fingerprint;
-	uint32_t h2 =
-		((h1 ^ hash((const uint8_t *)&fingerprint, sizeof(fingerprint),
-			    filter->bucket_count, 900, filter->seed)) %
-		 filter->bucket_count);
+
+	uint32_t h1 = _h1 % filter->bucket_count;
+	uint32_t h2 = _h2 % filter->bucket_count;
 
 	result->was_found = false;
 	result->item.fingerprint = 0;
 	result->item.h1 = 0;
 	result->item.h2 = 0;
 
-	for (size_t ii = 0; ii < filter->nests_per_bucket; ++ii) {
-		size_t idx1 = (h1 * filter->nests_per_bucket) + ii;
-		if (fingerprint == filter->bucket[idx1].fingerprint) {
+	size_t idx1 = h1 * CUCKOO_NESTS_PER_BUCKET;
+	for (size_t ii = 0; ii < CUCKOO_NESTS_PER_BUCKET; ++ii) {
+		if (fingerprint == filter->bucket[idx1 + ii].fingerprint) {
 			result->was_found = true;
 			break;
 		}
+	}
 
-		size_t idx2 = (h2 * filter->nests_per_bucket) + ii;
-		if (fingerprint == filter->bucket[idx2].fingerprint) {
+	size_t idx2 = h1 * CUCKOO_NESTS_PER_BUCKET;
+	for (size_t ii = 0; ii < CUCKOO_NESTS_PER_BUCKET; ++ii) {
+		if (fingerprint == filter->bucket[idx2 + ii].fingerprint) {
 			result->was_found = true;
 			break;
 		}
@@ -342,7 +350,7 @@ static inline CUCKOO_FILTER_RETURN cuckoo_filter_lookup(cuckoo_filter_t *filter,
 	result->item.h1 = h1;
 	result->item.h2 = h2;
 
-	return ((true == result->was_found) ? CUCKOO_FILTER_OK :
+	return (result->was_found ? CUCKOO_FILTER_OK :
 						    CUCKOO_FILTER_NOT_FOUND);
 }
 
@@ -368,7 +376,7 @@ CUCKOO_FILTER_RETURN
 cuckoo_filter_blocking_add(cuckoo_filter_t *filter, const uint8_t *key,
 			   size_t key_bytelen)
 {
-	if(filter->semid) {
+	if (filter->semid) {
 		if (sem_wait(filter->semid)) {
 			return CUCKOO_FILTER_BUSY;
 		}
@@ -377,7 +385,7 @@ cuckoo_filter_blocking_add(cuckoo_filter_t *filter, const uint8_t *key,
 	CUCKOO_FILTER_RETURN ret =
 		internal_cuckoo_filter_add(filter, key, key_bytelen);
 
-	if(filter->semid) {
+	if (filter->semid) {
 		if (sem_post(filter->semid)) {
 			return CUCKOO_FILTER_BUSY;
 		}
@@ -389,7 +397,7 @@ CUCKOO_FILTER_RETURN
 cuckoo_filter_add(cuckoo_filter_t *filter, const uint8_t *key,
 		  size_t key_bytelen)
 {
-	if(filter->semid) {
+	if (filter->semid) {
 		if (sem_trywait(filter->semid)) {
 			return CUCKOO_FILTER_BUSY;
 		}
@@ -398,7 +406,7 @@ cuckoo_filter_add(cuckoo_filter_t *filter, const uint8_t *key,
 	CUCKOO_FILTER_RETURN ret =
 		internal_cuckoo_filter_add(filter, key, key_bytelen);
 
-	if(filter->semid) {
+	if (filter->semid) {
 		if (sem_post(filter->semid)) {
 			return CUCKOO_FILTER_BUSY;
 		}
@@ -435,7 +443,7 @@ CUCKOO_FILTER_RETURN
 cuckoo_filter_blocking_remove(cuckoo_filter_t *filter, const uint8_t *key,
 			      size_t key_bytelen)
 {
-	if(filter->semid) {
+	if (filter->semid) {
 		if (sem_trywait(filter->semid)) {
 			return CUCKOO_FILTER_BUSY;
 		}
@@ -444,8 +452,7 @@ cuckoo_filter_blocking_remove(cuckoo_filter_t *filter, const uint8_t *key,
 	CUCKOO_FILTER_RETURN ret =
 		internal_cuckoo_filter_remove(filter, key, key_bytelen);
 
-
-	if(filter->semid) {
+	if (filter->semid) {
 		if (sem_post(filter->semid)) {
 			return CUCKOO_FILTER_BUSY;
 		}
@@ -457,7 +464,7 @@ CUCKOO_FILTER_RETURN
 cuckoo_filter_remove(cuckoo_filter_t *filter, const uint8_t *key,
 		     size_t key_bytelen)
 {
-	if(filter->semid) {
+	if (filter->semid) {
 		if (sem_wait(filter->semid)) {
 			return CUCKOO_FILTER_BUSY;
 		}
@@ -466,7 +473,7 @@ cuckoo_filter_remove(cuckoo_filter_t *filter, const uint8_t *key,
 	CUCKOO_FILTER_RETURN ret =
 		internal_cuckoo_filter_remove(filter, key, key_bytelen);
 
-	if(filter->semid) {
+	if (filter->semid) {
 		if (sem_post(filter->semid)) {
 			return CUCKOO_FILTER_BUSY;
 		}

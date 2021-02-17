@@ -15,6 +15,7 @@ typedef enum {
 	CUCKOO_FILTER_ALLOCATION_FAILED,
 	CUCKOO_FILTER_BUSY,
 	CUCKOO_FILTER_RETRY,
+	CUCKOO_FILTER_SEMERR,
 } CUCKOO_FILTER_RETURN;
 
 typedef struct cuckoo_filter_t cuckoo_filter_t;
