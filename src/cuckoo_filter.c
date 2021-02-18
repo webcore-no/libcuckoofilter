@@ -234,6 +234,7 @@ cuckoo_filter_shm_new(const char *name, cuckoo_filter_t **filter,
 	new_filter->max_kick_attempts = max_kick_attempts;
 	new_filter->seed = seed;
 	new_filter->mask = (uint32_t)((1U << CUCKOO_FINGERPRINT_SIZE) - 1);
+	sem_unlink(name);
 	new_filter->semid = sem_open(name, O_CREAT,
 				     S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH, 1);
 	if (new_filter->semid == SEM_FAILED) {
@@ -330,16 +331,10 @@ static inline CUCKOO_FILTER_RETURN cuckoo_filter_lookup(cuckoo_filter_t *filter,
 	result->item.h2 = 0;
 
 	size_t idx1 = h1 * CUCKOO_NESTS_PER_BUCKET;
-	for (size_t ii = 0; ii < CUCKOO_NESTS_PER_BUCKET; ++ii) {
-		if (fingerprint == filter->bucket[idx1 + ii].fingerprint) {
-			result->was_found = true;
-			break;
-		}
-	}
-
 	size_t idx2 = h1 * CUCKOO_NESTS_PER_BUCKET;
 	for (size_t ii = 0; ii < CUCKOO_NESTS_PER_BUCKET; ++ii) {
-		if (fingerprint == filter->bucket[idx2 + ii].fingerprint) {
+		if (fingerprint == filter->bucket[idx1 + ii].fingerprint &&
+		    fingerprint == filter->bucket[idx2 + ii].fingerprint) {
 			result->was_found = true;
 			break;
 		}
@@ -349,8 +344,7 @@ static inline CUCKOO_FILTER_RETURN cuckoo_filter_lookup(cuckoo_filter_t *filter,
 	result->item.h1 = h1;
 	result->item.h2 = h2;
 
-	return (result->was_found ? CUCKOO_FILTER_OK :
-						    CUCKOO_FILTER_NOT_FOUND);
+	return (result->was_found ? CUCKOO_FILTER_OK : CUCKOO_FILTER_NOT_FOUND);
 }
 
 static CUCKOO_FILTER_RETURN internal_cuckoo_filter_add(cuckoo_filter_t *filter,
@@ -488,7 +482,8 @@ cuckoo_filter_contains(cuckoo_filter_t *filter, const uint8_t *key,
 	return cuckoo_filter_lookup(filter, &result, key, key_bytelen);
 }
 CUCKOO_FILTER_RETURN
-cuckoo_filter_lock(cuckoo_filter_t *filter) {
+cuckoo_filter_lock(cuckoo_filter_t *filter)
+{
 	if (filter->semid) {
 		if (sem_wait(filter->semid)) {
 			return CUCKOO_FILTER_BUSY;
@@ -497,7 +492,8 @@ cuckoo_filter_lock(cuckoo_filter_t *filter) {
 	return CUCKOO_FILTER_OK;
 }
 CUCKOO_FILTER_RETURN
-cuckoo_filter_unlock(cuckoo_filter_t *filter) {
+cuckoo_filter_unlock(cuckoo_filter_t *filter)
+{
 	if (filter->semid) {
 		if (sem_post(filter->semid)) {
 			return CUCKOO_FILTER_BUSY;

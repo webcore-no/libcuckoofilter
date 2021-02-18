@@ -90,7 +90,7 @@ int create_worker(worker *wrk)
 	return 0;
 }
 
-#define wc 24
+#define wc 8
 int main(void)
 {
 	if(signal(SIGHUP, &handle_sighup) == SIG_ERR) {
