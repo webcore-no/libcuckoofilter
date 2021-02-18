@@ -351,13 +351,16 @@ static CUCKOO_FILTER_RETURN internal_cuckoo_filter_add(cuckoo_filter_t *filter,
 						       const uint8_t *key,
 						       size_t key_bytelen)
 {
-	uint32_t fingerprint = hash(key, key_bytelen, filter->bucket_count,
-				    1000, filter->seed);
-	uint32_t h1 =
-		hash(key, key_bytelen, filter->bucket_count, 0, filter->seed);
-	uint32_t depth = 0;
+	uint32_t _h1 = XXH3_64bits_withSeed(key, key_bytelen, filter->seed);
+	uint32_t _h2 = XXH3_64bits_withSeed(key, key_bytelen, _h1);
+
+	uint32_t fingerprint = (_h1 + (1000 * _h2)) % filter->bucket_count;
 	fingerprint &= filter->mask;
 	fingerprint += !fingerprint;
+
+	uint32_t h1 = _h1 % filter->bucket_count;
+
+	uint32_t depth = 0;
 	if (cuckoo_filter_relocate(filter, fingerprint, h1, &depth) !=
 	    CUCKOO_FILTER_OK) {
 		return CUCKOO_FILTER_FULL;
