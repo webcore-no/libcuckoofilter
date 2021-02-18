@@ -40,20 +40,8 @@ cuckoo_filter_remove(cuckoo_filter_t *filter, const uint8_t *key,
 		     size_t key_length_in_bytes);
 
 CUCKOO_FILTER_RETURN
-cuckoo_filter_blocking_add(cuckoo_filter_t *filter, const uint8_t *key,
-			   size_t key_length_in_bytes);
-
-CUCKOO_FILTER_RETURN
-cuckoo_filter_blocking_remove(cuckoo_filter_t *filter, const uint8_t *key,
-			      size_t key_length_in_bytes);
-
-CUCKOO_FILTER_RETURN
 cuckoo_filter_contains(cuckoo_filter_t *filter, const uint8_t *key,
 		       size_t key_length_in_bytes);
 const char *cuckoo_strerr(CUCKOO_FILTER_RETURN);
-CUCKOO_FILTER_RETURN
-cuckoo_filter_lock(cuckoo_filter_t *filter);
-CUCKOO_FILTER_RETURN
-cuckoo_filter_unlock(cuckoo_filter_t *filter);
 #endif /* CUCKOO_FILTER_H */
 

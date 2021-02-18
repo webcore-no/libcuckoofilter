@@ -5,6 +5,8 @@ PREFIX=/usr
 CC = gcc
 CFLAGS = -Wall -Wextra -std=gnu99 -g -Ofast -I include -fPIC -lpthread -lrt -DCUCKOO_FINGERPRINT_SIZE=$(FINGERPRINT_SIZE) -DCUCKOO_NESTS_PER_BUCKET=$(NESTS_PER_BUCKET) -DCUCKOO_SHM -fno-omit-frame-pointer
 
+CFLAGS = -Wall -Wextra -std=gnu99 -g -O0 -I include -fPIC -lpthread -lrt -DCUCKOO_FINGERPRINT_SIZE=$(FINGERPRINT_SIZE) -DCUCKOO_NESTS_PER_BUCKET=$(NESTS_PER_BUCKET) -DCUCKOO_SHM -fno-omit-frame-pointer
+
 
 SOURCE := $(wildcard src/*.c)
 OBJECTS := $(SOURCE:src/%.c=build/%.o)
@@ -21,6 +23,9 @@ run_tests: tests/tests
 
 benchmark: tests/benchmark
 	tests/benchmark
+
+collision: tests/collision
+	tests/collision
 
 tests/%: $(OBJECTS) tests/%.c
 	$(CC) $(CFLAGS) -lcheck $^ -o $@

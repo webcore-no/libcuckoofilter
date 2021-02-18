@@ -11,9 +11,6 @@
 #define ELEMENTS 100000000
 #define TEST_DURATION 10
 #define PREFILL 0.5
-#define CONTAINS_P 85
-#define ADD_P 10
-#define REMOVE_P 5
 
 
 
@@ -21,6 +18,7 @@ typedef struct {
 	int parent_fd;
 	cuckoo_filter_t *filter;
 	uint32_t op_counter;
+	uint32_t full_hits;
 } _globals;
 _globals globals;
 
@@ -28,14 +26,12 @@ void worker_loop()
 {
 	srand(getpid());
 	while(true) {
+		CUCKOO_FILTER_RETURN ret;
 		int k = rand();
-		int n = k%100;
-		if(n < CONTAINS_P) {
-			cuckoo_filter_contains(globals.filter,(const uint8_t *)&k, sizeof(k));
-		} else if(n < (CONTAINS_P+ADD_P)) {
-			cuckoo_filter_add(globals.filter,(const uint8_t *)&k, sizeof(k));
-		} else {
-			cuckoo_filter_remove(globals.filter,(const uint8_t *)&k, sizeof(k));
+		ret = cuckoo_filter_add(globals.filter,(const uint8_t *)&k, sizeof(k));
+
+		if(ret == CUCKOO_FILTER_FULL) {
+			globals.full_hits++;
 		}
 		globals.op_counter++;
 	}
@@ -44,6 +40,10 @@ void worker_loop()
 void handle_sighup(int __attribute__((unused)) signal) {
 	// Write total ammount off operations and exit
 	ssize_t wr = write(globals.parent_fd, &globals.op_counter, sizeof(uint32_t));
+	if(wr == -1) {
+		printf("%d:%s\n", errno, strerror(errno));
+	}
+	wr = write(globals.parent_fd, &globals.full_hits, sizeof(uint32_t));
 	if(wr == -1) {
 		printf("%d:%s\n", errno, strerror(errno));
 	}
@@ -126,15 +126,18 @@ int main(void)
 	// Kill all workers
 	for(int i = 0; i < wc; i++) {
 		uint32_t worker_out = 0;
+		uint32_t worker_out_full = 0;
 		if(kill(workers[i].pid, SIGHUP)) {
 			cuckoo_filter_free(&globals.filter);
 			printf("ERROR[%d]:%s", errno, strerror(errno));
 			exit(1);
 		}
 		read(workers[i].fd, &worker_out, sizeof(uint32_t));
+		read(workers[i].fd, &worker_out_full, sizeof(uint32_t));
 		globals.op_counter += worker_out;
+		globals.full_hits += worker_out_full;
 	}
 	cuckoo_filter_free(&globals.filter);
-	printf("%d ops/s\n", globals.op_counter/ TEST_DURATION);
+	printf("%lf full_hits\n", (double)globals.full_hits / (double)globals.op_counter);
 	return 0;
 }

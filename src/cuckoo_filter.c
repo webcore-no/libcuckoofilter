@@ -12,8 +12,6 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <unistd.h>
-#include <semaphore.h>
-
 #ifndef CUCKOO_NESTS_PER_BUCKET
 #define CUCKOO_NESTS_PER_BUCKET 4
 #endif
@@ -21,6 +19,9 @@
 #ifndef CUCKOO_FINGERPRINT_SIZE
 #define CUCKOO_FINGERPRINT_SIZE 15
 #endif
+
+
+#define BUCKETS_PER_MARK (sizeof(atomic_char)*8)
 
 static const char *_cuckoo_errstr[] = {
 	[CUCKOO_FILTER_OK] = "OK",
@@ -39,9 +40,10 @@ const char *cuckoo_strerr(CUCKOO_FILTER_RETURN errnum)
 static inline uint32_t hash(const uint8_t *, uint32_t, uint32_t, uint32_t,
 			    uint32_t);
 
+static inline bool mark(cuckoo_filter_t *filter, size_t idx);
+static inline bool release_mark(cuckoo_filter_t *filter, size_t idx);
 typedef struct {
-	uint16_t fingerprint : CUCKOO_FINGERPRINT_SIZE;
-	bool marked : 1;
+	uint16_t fingerprint;
 } __attribute__((packed, aligned(2))) cuckoo_nest_t;
 
 typedef struct {
@@ -59,12 +61,12 @@ typedef struct {
 struct cuckoo_filter_t {
 	const char *name;
 	uint32_t fd;
-	sem_t *semid;
 	uint32_t bucket_count;
 	uint32_t mask;
 	uint32_t max_kick_attempts;
 	uint32_t seed;
 	uint32_t padding;
+	atomic_char *marks;
 	cuckoo_nest_t bucket[1];
 };
 
@@ -159,28 +161,26 @@ KICK:
 
 	size_t row = hash_table ? h1 : h2;
 
-	size_t idy = (row * CUCKOO_NESTS_PER_BUCKET);
+	size_t idy = row;
 	size_t idx = (row * CUCKOO_NESTS_PER_BUCKET) + col;
-	if (filter->bucket[idy].marked) {
+	if (!mark(filter, idy)) {
 		return CUCKOO_FILTER_RETRY;
 	}
 
 	size_t elem = filter->bucket[idx].fingerprint;
-	filter->bucket[idy].marked = true;
 
 	CUCKOO_FILTER_RETURN ret;
 	if ((ret = cuckoo_filter_relocate(filter, elem, row, depth)) !=
 	    CUCKOO_FILTER_OK) {
-		filter->bucket[idy].marked = false;
+		release_mark(filter, idy);
 		if (ret == CUCKOO_FILTER_RETRY) {
 			(*depth)++;
 			goto KICK;
 		}
 		return CUCKOO_FILTER_FULL;
 	}
-	filter->bucket[idy].marked = false;
 	filter->bucket[idx].fingerprint = fingerprint;
-
+	release_mark(filter, idy);
 	return CUCKOO_FILTER_OK;
 }
 
@@ -208,7 +208,7 @@ cuckoo_filter_shm_new(const char *name, cuckoo_filter_t **filter,
 	/* FIXME: Should check for integer overflows here */
 	size_t allocation_in_bytes = (sizeof(cuckoo_filter_t) +
 				      (bucket_count * CUCKOO_NESTS_PER_BUCKET *
-				       sizeof(cuckoo_nest_t)));
+				       sizeof(cuckoo_nest_t)) + bucket_count / BUCKETS_PER_MARK);
 
 	fd = shm_open(name, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
 	if (fd == -1) {
@@ -234,15 +234,8 @@ cuckoo_filter_shm_new(const char *name, cuckoo_filter_t **filter,
 	new_filter->max_kick_attempts = max_kick_attempts;
 	new_filter->seed = seed;
 	new_filter->mask = (uint32_t)((1U << CUCKOO_FINGERPRINT_SIZE) - 1);
-	sem_unlink(name);
-	new_filter->semid = sem_open(name, O_CREAT,
-				     S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH, 1);
-	if (new_filter->semid == SEM_FAILED) {
-		printf("%s:%d:%s\n", name, errno, strerror(errno));
-		new_filter->semid = NULL;
-		cuckoo_filter_free(&new_filter);
-		return CUCKOO_FILTER_SEMERR;
-	}
+
+	new_filter->marks = (void *)(new_filter) + allocation_in_bytes - bucket_count / BUCKETS_PER_MARK;
 	*filter = new_filter;
 
 	return CUCKOO_FILTER_OK;
@@ -282,7 +275,6 @@ cuckoo_filter_new(cuckoo_filter_t **filter, size_t max_key_count,
 	new_filter->max_kick_attempts = max_kick_attempts;
 	new_filter->seed = seed;
 	new_filter->mask = (uint32_t)((1U << CUCKOO_FINGERPRINT_SIZE) - 1);
-	new_filter->semid = NULL;
 
 	*filter = new_filter;
 
@@ -294,13 +286,6 @@ cuckoo_filter_free(cuckoo_filter_t **filter)
 {
 	if ((*filter)->name) {
 		close((*filter)->fd);
-		if ((*filter)->semid) {
-			sem_close((*filter)->semid);
-			if (sem_unlink((*filter)->name)) {
-				printf("(%s)%d:%s\n", (*filter)->name, errno,
-				       strerror(errno));
-			}
-		}
 		shm_unlink((*filter)->name);
 	} else {
 		free(*filter);
@@ -347,7 +332,7 @@ static inline CUCKOO_FILTER_RETURN cuckoo_filter_lookup(cuckoo_filter_t *filter,
 	return (result->was_found ? CUCKOO_FILTER_OK : CUCKOO_FILTER_NOT_FOUND);
 }
 
-static CUCKOO_FILTER_RETURN internal_cuckoo_filter_add(cuckoo_filter_t *filter,
+CUCKOO_FILTER_RETURN cuckoo_filter_add(cuckoo_filter_t *filter,
 						       const uint8_t *key,
 						       size_t key_bytelen)
 {
@@ -369,49 +354,7 @@ static CUCKOO_FILTER_RETURN internal_cuckoo_filter_add(cuckoo_filter_t *filter,
 }
 
 CUCKOO_FILTER_RETURN
-cuckoo_filter_blocking_add(cuckoo_filter_t *filter, const uint8_t *key,
-			   size_t key_bytelen)
-{
-	if (filter->semid) {
-		if (sem_wait(filter->semid)) {
-			return CUCKOO_FILTER_BUSY;
-		}
-	}
-
-	CUCKOO_FILTER_RETURN ret =
-		internal_cuckoo_filter_add(filter, key, key_bytelen);
-
-	if (filter->semid) {
-		if (sem_post(filter->semid)) {
-			return CUCKOO_FILTER_BUSY;
-		}
-	}
-	return ret;
-}
-
-CUCKOO_FILTER_RETURN
-cuckoo_filter_add(cuckoo_filter_t *filter, const uint8_t *key,
-		  size_t key_bytelen)
-{
-	if (filter->semid) {
-		if (sem_trywait(filter->semid)) {
-			return CUCKOO_FILTER_BUSY;
-		}
-	}
-
-	CUCKOO_FILTER_RETURN ret =
-		internal_cuckoo_filter_add(filter, key, key_bytelen);
-
-	if (filter->semid) {
-		if (sem_post(filter->semid)) {
-			return CUCKOO_FILTER_BUSY;
-		}
-	}
-	return ret;
-}
-
-CUCKOO_FILTER_RETURN
-internal_cuckoo_filter_remove(cuckoo_filter_t *filter, const uint8_t *key,
+cuckoo_filter_remove(cuckoo_filter_t *filter, const uint8_t *key,
 			      size_t key_bytelen)
 {
 	cuckoo_result_t result;
@@ -435,47 +378,6 @@ internal_cuckoo_filter_remove(cuckoo_filter_t *filter, const uint8_t *key,
 	return ((true == was_deleted) ? CUCKOO_FILTER_OK :
 					      CUCKOO_FILTER_NOT_FOUND);
 }
-CUCKOO_FILTER_RETURN
-cuckoo_filter_blocking_remove(cuckoo_filter_t *filter, const uint8_t *key,
-			      size_t key_bytelen)
-{
-	if (filter->semid) {
-		if (sem_wait(filter->semid)) {
-			return CUCKOO_FILTER_BUSY;
-		}
-	}
-
-	CUCKOO_FILTER_RETURN ret =
-		internal_cuckoo_filter_remove(filter, key, key_bytelen);
-
-	if (filter->semid) {
-		if (sem_post(filter->semid)) {
-			return CUCKOO_FILTER_BUSY;
-		}
-	}
-	return ret;
-}
-
-CUCKOO_FILTER_RETURN
-cuckoo_filter_remove(cuckoo_filter_t *filter, const uint8_t *key,
-		     size_t key_bytelen)
-{
-	if (filter->semid) {
-		if (sem_trywait(filter->semid)) {
-			return CUCKOO_FILTER_BUSY;
-		}
-	}
-
-	CUCKOO_FILTER_RETURN ret =
-		internal_cuckoo_filter_remove(filter, key, key_bytelen);
-
-	if (filter->semid) {
-		if (sem_post(filter->semid)) {
-			return CUCKOO_FILTER_BUSY;
-		}
-	}
-	return ret;
-}
 
 CUCKOO_FILTER_RETURN
 cuckoo_filter_contains(cuckoo_filter_t *filter, const uint8_t *key,
@@ -483,26 +385,6 @@ cuckoo_filter_contains(cuckoo_filter_t *filter, const uint8_t *key,
 {
 	cuckoo_result_t result;
 	return cuckoo_filter_lookup(filter, &result, key, key_bytelen);
-}
-CUCKOO_FILTER_RETURN
-cuckoo_filter_lock(cuckoo_filter_t *filter)
-{
-	if (filter->semid) {
-		if (sem_wait(filter->semid)) {
-			return CUCKOO_FILTER_BUSY;
-		}
-	}
-	return CUCKOO_FILTER_OK;
-}
-CUCKOO_FILTER_RETURN
-cuckoo_filter_unlock(cuckoo_filter_t *filter)
-{
-	if (filter->semid) {
-		if (sem_post(filter->semid)) {
-			return CUCKOO_FILTER_BUSY;
-		}
-	}
-	return CUCKOO_FILTER_OK;
 }
 
 static inline uint32_t hash(const uint8_t *key, uint32_t key_bytelen,
@@ -513,3 +395,15 @@ static inline uint32_t hash(const uint8_t *key, uint32_t key_bytelen,
 
 	return ((h1 + (n * h2)) % size);
 }
+
+static inline bool mark(cuckoo_filter_t *filter, size_t idx) {
+	size_t mark_index = idx/BUCKETS_PER_MARK;
+	size_t bit = 1u << (idx%BUCKETS_PER_MARK);
+	return (atomic_fetch_or(&filter->marks[mark_index], bit) & bit) == 0;
+}
+static inline bool release_mark(cuckoo_filter_t *filter, size_t idx) {
+	size_t mark_index = idx/BUCKETS_PER_MARK;
+	size_t bit = 1u << (idx%BUCKETS_PER_MARK);
+	return (atomic_fetch_and(&filter->marks[mark_index], ~bit) & bit);
+}
+

@@ -1,4 +1,5 @@
 tests/benchmark
+tests/collision
 tests/tests
 build/
 .ccls-cache/
