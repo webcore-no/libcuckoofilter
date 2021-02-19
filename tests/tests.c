@@ -1,5 +1,6 @@
 #include "../include/cuckoo_filter.h"
 #include <check.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -124,6 +125,18 @@ FCK_START(test_cuckoofilter_loop)
 }
 FCK_END
 
+FCK_START(test_cuckoofilter_add_more)
+{
+	for(int i = 0; i < 80000; i++) {
+		FCK_PADD(&i);
+	}
+	for(int i = 0; i < 80000; i++) {
+		FCK_PCONTAINS(&i);
+	}
+}
+FCK_END
+
+
 FCK_SHM_START(test_cuckoofilter_forked_add)
 {
 	for(int i = 0; i < 10000; i++) {
@@ -154,6 +167,74 @@ FCK_SHM_START(test_cuckoofilter_forked_add)
 }
 FCK_END
 
+#define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
+#define BYTE_TO_BINARY(byte)  \
+  (byte & 0x80 ? '1' : '0'), \
+  (byte & 0x40 ? '1' : '0'), \
+  (byte & 0x20 ? '1' : '0'), \
+  (byte & 0x10 ? '1' : '0'), \
+  (byte & 0x08 ? '1' : '0'), \
+  (byte & 0x04 ? '1' : '0'), \
+  (byte & 0x02 ? '1' : '0'), \
+  (byte & 0x01 ? '1' : '0') 
+
+FCK_SHM_START(test_cuckoofilter_forked_add_multi)
+{
+	for(int i = 0; i < 10000; i++) {
+		FCK_PEXCLUDES(&i);
+		FCK_PADD(&i);
+	}
+	pid_t pid = fork();
+	ck_assert_int_ge(pid, 0);
+	if(pid) {
+		//Parent
+		// Do some reading while child adds
+		for(int i = 0; i < 10000; i++) {
+			FCK_PCONTAINS(&i);
+		}
+		waitpid(pid, NULL, 0);
+		// Read values child added
+		for(int i = 10000; i < 80000; i++) {
+			//printf("%d\n", i);
+			//FCK_PCONTAINS(&i);
+			ret = cuckoo_filter_contains(filter, (const uint8_t *)&i, sizeof(i));
+			if(ret != CUCKOO_FILTER_OK) {
+				printf("\n"BYTE_TO_BINARY_PATTERN BYTE_TO_BINARY_PATTERN "\n%d\n", BYTE_TO_BINARY(i), BYTE_TO_BINARY(i >> 8), i);
+			}
+			ret = cuckoo_filter_add(filter, (const uint8_t *)&i, sizeof(i));
+			if(ret != CUCKOO_FILTER_OK) {
+				printf("Failed to add\n");
+			}
+			ret = cuckoo_filter_contains(filter, (const uint8_t *)&i, sizeof(i));
+			if(ret != CUCKOO_FILTER_OK) {
+				printf("Failed to contain\n");
+			}
+		}
+	} else {
+		pid = fork();
+		if(pid) {
+			// other child
+			for(int i = 10000; i < 40000; i++) {
+				ret = cuckoo_filter_add(filter, (const uint8_t *)&i, sizeof(i));
+				if(ret != CUCKOO_FILTER_OK) {
+					printf("Error at %d\n", i);
+				}
+			}
+			exit(0);
+		}
+		// Child
+		// Write some values and exit
+		for(int i = 40000; i < 80000; i++) {
+			ret = cuckoo_filter_add(filter, (const uint8_t *)&i, sizeof(i));
+			if(ret != CUCKOO_FILTER_OK) {
+				printf("Error at %d\n", i);
+			}
+		}
+		waitpid(pid, NULL, 0);
+		exit(0);
+	}
+}
+FCK_END
 
 FCK_SHM_START(test_cuckoofilter_forked_remove)
 {
@@ -220,6 +301,8 @@ FCK_SHM_START(test_cuckoofilter_forked_remove_and_add)
 }
 FCK_END
 
+
+
 Suite *cuckoofilter_suite(void)
 {
 	Suite *s;
@@ -236,12 +319,14 @@ Suite *cuckoofilter_suite(void)
 	tcase_add_test(tc_core, test_cuckoofilter_add_multi);
 	tcase_add_test(tc_core, test_cuckoofilter_remove_multi);
 	tcase_add_test(tc_core, test_cuckoofilter_loop);
+	tcase_add_test(tc_core, test_cuckoofilter_add_more);
 	suite_add_tcase(s, tc_core);
 
 	tc_shm = tcase_create("SHM");
 	tcase_add_test(tc_shm, test_cuckoofilter_forked_add);
 	tcase_add_test(tc_shm, test_cuckoofilter_forked_remove);
 	tcase_add_test(tc_shm, test_cuckoofilter_forked_remove_and_add);
+	tcase_add_test(tc_shm, test_cuckoofilter_forked_add_multi);
 	suite_add_tcase(s, tc_shm);
 	return s;
 }

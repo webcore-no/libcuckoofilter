@@ -8,11 +8,10 @@
 #include <sys/types.h>
 #include <signal.h>
 
-#define ELEMENTS 100000000
-#define TEST_DURATION 10
+#define ELEMENTS 10000000
 #define PREFILL 0.5
-
-
+#define TESTP 1
+#define WORKER_COUNT 8
 
 typedef struct {
 	int parent_fd;
@@ -34,22 +33,17 @@ void worker_loop()
 			globals.full_hits++;
 		}
 		globals.op_counter++;
+		if(globals.op_counter >= (ELEMENTS*TESTP)/WORKER_COUNT) {
+			// Write total ammount off operations and exit
+			ssize_t wr = write(globals.parent_fd, &globals.full_hits, sizeof(uint32_t));
+			if(wr == -1) {
+				printf("%d:%s\n", errno, strerror(errno));
+			}
+			fflush(stdout);
+			close(globals.parent_fd);
+			exit(0);
+		}
 	}
-}
-
-void handle_sighup(int __attribute__((unused)) signal) {
-	// Write total ammount off operations and exit
-	ssize_t wr = write(globals.parent_fd, &globals.op_counter, sizeof(uint32_t));
-	if(wr == -1) {
-		printf("%d:%s\n", errno, strerror(errno));
-	}
-	wr = write(globals.parent_fd, &globals.full_hits, sizeof(uint32_t));
-	if(wr == -1) {
-		printf("%d:%s\n", errno, strerror(errno));
-	}
-	fflush(stdout);
-	close(globals.parent_fd);
-	exit(0);
 }
 
 
@@ -89,15 +83,9 @@ int create_worker(worker *wrk)
 
 	return 0;
 }
-
-#define wc 8
 int main(void)
 {
-	if(signal(SIGHUP, &handle_sighup) == SIG_ERR) {
-		printf("ERROR[%d]:%s\n", errno, strerror(errno));
-		exit(1);
-	}
-	worker workers[wc];
+	worker workers[WORKER_COUNT];
 	if(cuckoo_filter_shm_new("tshm", &globals.filter, ELEMENTS, 150, 123)) {
 		printf("ERROR: falied to make filter");
 		exit(1);
@@ -114,7 +102,7 @@ int main(void)
 	}
 	printf("prefill done\n");
 	// create all workers
-	for(i = 0; i < wc; i++) {
+	for(i = 0; i < WORKER_COUNT; i++) {
 		if(create_worker(&workers[i])) {
 			cuckoo_filter_free(&globals.filter);
 			printf("ERROR[%d]:%s", errno, strerror(errno));
@@ -122,22 +110,12 @@ int main(void)
 		}
 	}
 	// sleep some time
-	sleep(TEST_DURATION);
-	// Kill all workers
-	for(int i = 0; i < wc; i++) {
+	for(int i = 0; i < WORKER_COUNT; i++) {
 		uint32_t worker_out = 0;
-		uint32_t worker_out_full = 0;
-		if(kill(workers[i].pid, SIGHUP)) {
-			cuckoo_filter_free(&globals.filter);
-			printf("ERROR[%d]:%s", errno, strerror(errno));
-			exit(1);
-		}
 		read(workers[i].fd, &worker_out, sizeof(uint32_t));
-		read(workers[i].fd, &worker_out_full, sizeof(uint32_t));
-		globals.op_counter += worker_out;
-		globals.full_hits += worker_out_full;
+		globals.full_hits += worker_out;
 	}
 	cuckoo_filter_free(&globals.filter);
-	printf("%lf full_hits\n", (double)globals.full_hits / (double)globals.op_counter);
+	printf("%lf full_hits\n", (double)globals.full_hits / (ELEMENTS*TESTP));
 	return 0;
 }

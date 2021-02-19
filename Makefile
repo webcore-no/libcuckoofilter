@@ -1,11 +1,11 @@
-FINGERPRINT_SIZE=15
+FINGERPRINT_SIZE=16
 NESTS_PER_BUCKET=4
 PREFIX=/usr
 
 CC = gcc
 CFLAGS = -Wall -Wextra -std=gnu99 -g -Ofast -I include -fPIC -lpthread -lrt -DCUCKOO_FINGERPRINT_SIZE=$(FINGERPRINT_SIZE) -DCUCKOO_NESTS_PER_BUCKET=$(NESTS_PER_BUCKET) -DCUCKOO_SHM -fno-omit-frame-pointer
 
-CFLAGS = -Wall -Wextra -std=gnu99 -g -O0 -I include -fPIC -lpthread -lrt -DCUCKOO_FINGERPRINT_SIZE=$(FINGERPRINT_SIZE) -DCUCKOO_NESTS_PER_BUCKET=$(NESTS_PER_BUCKET) -DCUCKOO_SHM -fno-omit-frame-pointer
+CFLAGS = -Wall -Wextra -std=gnu99 -g -Ofast -I include -fPIC -lpthread -lrt -DCUCKOO_FINGERPRINT_SIZE=$(FINGERPRINT_SIZE) -DCUCKOO_NESTS_PER_BUCKET=$(NESTS_PER_BUCKET) -DCUCKOO_SHM -fno-omit-frame-pointer
 
 
 SOURCE := $(wildcard src/*.c)
