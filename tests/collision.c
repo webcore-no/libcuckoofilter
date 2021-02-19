@@ -10,7 +10,7 @@
 
 #define ELEMENTS 10000000
 #define PREFILL 0.5
-#define TESTP 1
+#define TESTP 2
 #define WORKER_COUNT 8
 
 typedef struct {

@@ -1,12 +1,8 @@
-FINGERPRINT_SIZE=16
 NESTS_PER_BUCKET=4
 PREFIX=/usr
 
 CC = gcc
-CFLAGS = -Wall -Wextra -std=gnu99 -g -Ofast -I include -fPIC -lpthread -lrt -DCUCKOO_FINGERPRINT_SIZE=$(FINGERPRINT_SIZE) -DCUCKOO_NESTS_PER_BUCKET=$(NESTS_PER_BUCKET) -DCUCKOO_SHM -fno-omit-frame-pointer
-
-CFLAGS = -Wall -Wextra -std=gnu99 -g -Ofast -I include -fPIC -lpthread -lrt -DCUCKOO_FINGERPRINT_SIZE=$(FINGERPRINT_SIZE) -DCUCKOO_NESTS_PER_BUCKET=$(NESTS_PER_BUCKET) -DCUCKOO_SHM -fno-omit-frame-pointer
-
+CFLAGS = -Wall -Wextra -Werror -std=gnu99 -g -Ofast -I include -fPIC -DCUCKOO_NESTS_PER_BUCKET=$(NESTS_PER_BUCKET)
 
 SOURCE := $(wildcard src/*.c)
 OBJECTS := $(SOURCE:src/%.c=build/%.o)
@@ -16,7 +12,7 @@ TESTS := $(TSOURCE:%.c=%)
 
 all: build/libcuckoofilter.so build/libcuckoofilter.a
 
-tests: $(TESTS) run_tests
+tests: $(TESTS)
 
 run_tests: tests/tests
 	tests/tests
@@ -28,7 +24,7 @@ collision: tests/collision
 	tests/collision
 
 tests/%: $(OBJECTS) tests/%.c
-	$(CC) $(CFLAGS) -lcheck $^ -o $@
+	$(CC) $(CFLAGS) -lcheck -lrt $^ -o $@
 
 build/libcuckoofilter.so: $(OBJECTS)
 	$(CC) $(CFLAGS) -shared $^ -o $@

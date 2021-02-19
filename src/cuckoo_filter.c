@@ -17,11 +17,10 @@
 #endif
 //Should be 8 * n - 1
 #ifndef CUCKOO_FINGERPRINT_SIZE
-#define CUCKOO_FINGERPRINT_SIZE 15
+#define CUCKOO_FINGERPRINT_SIZE 16
 #endif
 
-
-#define BUCKETS_PER_MARK (sizeof(atomic_char)*8)
+#define BUCKETS_PER_MARK (sizeof(atomic_char) * 8)
 
 static const char *_cuckoo_errstr[] = {
 	[CUCKOO_FILTER_OK] = "OK",
@@ -98,7 +97,6 @@ add_fingerprint_to_bucket(cuckoo_filter_t *filter, uint32_t fp, uint32_t h)
 		}
 	}
 	return CUCKOO_FILTER_FULL;
-
 }
 
 static inline CUCKOO_FILTER_RETURN
@@ -211,9 +209,11 @@ cuckoo_filter_shm_new(const char *name, cuckoo_filter_t **filter,
 	}
 
 	/* FIXME: Should check for integer overflows here */
-	uint64_t allocation_in_bytes = (sizeof(cuckoo_filter_t) +
-				      (bucket_count * CUCKOO_NESTS_PER_BUCKET *
-				       sizeof(cuckoo_nest_t)) + bucket_count / BUCKETS_PER_MARK);
+	uint64_t allocation_in_bytes =
+		(sizeof(cuckoo_filter_t) +
+		 (bucket_count * CUCKOO_NESTS_PER_BUCKET *
+		  sizeof(cuckoo_nest_t)) +
+		 bucket_count / BUCKETS_PER_MARK);
 
 	fd = shm_open(name, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
 	if (fd == -1) {
@@ -240,7 +240,8 @@ cuckoo_filter_shm_new(const char *name, cuckoo_filter_t **filter,
 	new_filter->seed = seed;
 	new_filter->mask = (uint32_t)((1U << CUCKOO_FINGERPRINT_SIZE) - 1);
 
-	new_filter->marks = (void *)(new_filter) + allocation_in_bytes - bucket_count / BUCKETS_PER_MARK;
+	new_filter->marks = (void *)(new_filter) + allocation_in_bytes -
+			    bucket_count / BUCKETS_PER_MARK;
 	*filter = new_filter;
 
 	return CUCKOO_FILTER_OK;
@@ -265,9 +266,10 @@ cuckoo_filter_new(cuckoo_filter_t **filter, uint64_t max_key_count,
 	}
 
 	/* FIXME: Should check for integer overflows here */
-	uint64_t allocation_in_bytes = (sizeof(cuckoo_filter_t) +
-				      (bucket_count * CUCKOO_NESTS_PER_BUCKET *
-				       sizeof(cuckoo_nest_t)));
+	uint64_t allocation_in_bytes =
+		(sizeof(cuckoo_filter_t) +
+		 (bucket_count * CUCKOO_NESTS_PER_BUCKET *
+		  sizeof(cuckoo_nest_t)));
 
 	new_filter = calloc(allocation_in_bytes, 1);
 	if (!new_filter) {
@@ -313,7 +315,8 @@ static inline CUCKOO_FILTER_RETURN cuckoo_filter_lookup(cuckoo_filter_t *filter,
 	fingerprint += !fingerprint;
 
 	uint32_t h1 = _h1 % filter->bucket_count;
-	uint32_t h2 = ((h1 ^ hash((const uint8_t *)&fingerprint, sizeof(fingerprint),
+	uint32_t h2 =
+		((h1 ^ hash((const uint8_t *)&fingerprint, sizeof(fingerprint),
 			    filter->bucket_count, 900, filter->seed)) %
 		 filter->bucket_count);
 
@@ -325,8 +328,8 @@ static inline CUCKOO_FILTER_RETURN cuckoo_filter_lookup(cuckoo_filter_t *filter,
 	uint64_t idx1 = h1 * CUCKOO_NESTS_PER_BUCKET;
 	uint64_t idx2 = h2 * CUCKOO_NESTS_PER_BUCKET;
 	for (uint64_t ii = 0; ii < CUCKOO_NESTS_PER_BUCKET; ++ii) {
-		if (filter->bucket[idx1 + ii].fingerprint  == fingerprint ||
-			filter->bucket[idx2 + ii].fingerprint == fingerprint) {
+		if (filter->bucket[idx1 + ii].fingerprint == fingerprint ||
+		    filter->bucket[idx2 + ii].fingerprint == fingerprint) {
 			result->was_found = true;
 			break;
 		}
@@ -340,8 +343,7 @@ static inline CUCKOO_FILTER_RETURN cuckoo_filter_lookup(cuckoo_filter_t *filter,
 }
 
 CUCKOO_FILTER_RETURN cuckoo_filter_add(cuckoo_filter_t *filter,
-						       const uint8_t *key,
-						       uint64_t key_bytelen)
+				       const uint8_t *key, uint64_t key_bytelen)
 {
 	uint32_t _h1 = XXH3_64bits_withSeed(key, key_bytelen, filter->seed);
 	uint32_t _h2 = XXH3_64bits_withSeed(key, key_bytelen, _h1);
@@ -362,7 +364,7 @@ CUCKOO_FILTER_RETURN cuckoo_filter_add(cuckoo_filter_t *filter,
 
 CUCKOO_FILTER_RETURN
 cuckoo_filter_remove(cuckoo_filter_t *filter, const uint8_t *key,
-			      uint64_t key_bytelen)
+		     uint64_t key_bytelen)
 {
 	cuckoo_result_t result;
 	bool was_deleted = false;
@@ -403,16 +405,20 @@ static inline uint32_t hash(const uint8_t *key, uint32_t key_bytelen,
 	return ((h1 + (n * h2)) % size);
 }
 
-static inline bool mark(cuckoo_filter_t *filter, uint64_t idx) {
-	if(!filter->marks) return 1;
-	uint64_t mark_index = idx/BUCKETS_PER_MARK;
-	uint64_t bit = 1u << (idx%BUCKETS_PER_MARK);
+static inline bool mark(cuckoo_filter_t *filter, uint64_t idx)
+{
+	if (!filter->marks)
+		return 1;
+	uint64_t mark_index = idx / BUCKETS_PER_MARK;
+	uint64_t bit = 1u << (idx % BUCKETS_PER_MARK);
 	return (atomic_fetch_or(&filter->marks[mark_index], bit) & bit) == 0;
 }
-static inline bool release_mark(cuckoo_filter_t *filter, uint64_t idx) {
-	if(!filter->marks) return 1;
-	uint64_t mark_index = idx/BUCKETS_PER_MARK;
-	uint64_t bit = 1u << (idx%BUCKETS_PER_MARK);
+static inline bool release_mark(cuckoo_filter_t *filter, uint64_t idx)
+{
+	if (!filter->marks)
+		return 1;
+	uint64_t mark_index = idx / BUCKETS_PER_MARK;
+	uint64_t bit = 1u << (idx % BUCKETS_PER_MARK);
 	return (atomic_fetch_and(&filter->marks[mark_index], ~bit) & bit);
 }
 

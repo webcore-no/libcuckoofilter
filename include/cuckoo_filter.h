@@ -21,27 +21,27 @@ typedef enum {
 typedef struct cuckoo_filter_t cuckoo_filter_t;
 
 CUCKOO_FILTER_RETURN
-cuckoo_filter_new(cuckoo_filter_t **filter, size_t max_key_count,
-		  size_t max_kick_attempts, uint32_t seed);
+cuckoo_filter_new(cuckoo_filter_t **filter, uint64_t max_key_count,
+		  uint64_t max_kick_attempts, uint32_t seed);
 
 CUCKOO_FILTER_RETURN
 cuckoo_filter_shm_new(const char *name, cuckoo_filter_t **filter,
-		      size_t max_key_count, size_t max_kick_attempts,
+		      uint64_t max_key_count, size_t max_kick_attempts,
 		      uint32_t seed);
 
 CUCKOO_FILTER_RETURN cuckoo_filter_free(cuckoo_filter_t **filter);
 
 CUCKOO_FILTER_RETURN
 cuckoo_filter_add(cuckoo_filter_t *filter, const uint8_t *key,
-		  size_t key_length_in_bytes);
+		  uint64_t key_length_in_bytes);
 
 CUCKOO_FILTER_RETURN
 cuckoo_filter_remove(cuckoo_filter_t *filter, const uint8_t *key,
-		     size_t key_length_in_bytes);
+		     uint64_t key_length_in_bytes);
 
 CUCKOO_FILTER_RETURN
 cuckoo_filter_contains(cuckoo_filter_t *filter, const uint8_t *key,
-		       size_t key_length_in_bytes);
+		       uint64_t key_length_in_bytes);
 const char *cuckoo_strerr(CUCKOO_FILTER_RETURN);
 #endif /* CUCKOO_FILTER_H */
 
