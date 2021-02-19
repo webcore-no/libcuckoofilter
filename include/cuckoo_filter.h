@@ -13,9 +13,7 @@ typedef enum {
 	CUCKOO_FILTER_NOT_FOUND,
 	CUCKOO_FILTER_FULL,
 	CUCKOO_FILTER_ALLOCATION_FAILED,
-	CUCKOO_FILTER_BUSY,
-	CUCKOO_FILTER_RETRY,
-	CUCKOO_FILTER_SEMERR,
+	CUCKOO_FILTER_RETRY
 } CUCKOO_FILTER_RETURN;
 
 typedef struct cuckoo_filter_t cuckoo_filter_t;
@@ -42,6 +40,5 @@ cuckoo_filter_remove(cuckoo_filter_t *filter, const uint8_t *key,
 CUCKOO_FILTER_RETURN
 cuckoo_filter_contains(cuckoo_filter_t *filter, const uint8_t *key,
 		       uint64_t key_length_in_bytes);
-const char *cuckoo_strerr(CUCKOO_FILTER_RETURN);
-#endif /* CUCKOO_FILTER_H */
+#endif
 

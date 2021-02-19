@@ -27,7 +27,7 @@ tests/%: $(OBJECTS) tests/%.c
 	$(CC) $(CFLAGS) -lcheck -lrt $^ -o $@
 
 build/libcuckoofilter.so: $(OBJECTS)
-	$(CC) $(CFLAGS) -shared $^ -o $@
+	$(CC) $(CFLAGS) -lrt -shared $^ -o $@
 
 build/libcuckoofilter.a: $(OBJECTS)
 	ar rs $@ $^

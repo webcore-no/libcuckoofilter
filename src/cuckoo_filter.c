@@ -22,20 +22,6 @@
 
 #define BUCKETS_PER_MARK (sizeof(atomic_char) * 8)
 
-static const char *_cuckoo_errstr[] = {
-	[CUCKOO_FILTER_OK] = "OK",
-	[CUCKOO_FILTER_NOT_FOUND] = "Not found",
-	[CUCKOO_FILTER_FULL] = "full",
-	[CUCKOO_FILTER_ALLOCATION_FAILED] = "allocation failed",
-	[CUCKOO_FILTER_BUSY] = "Filter is busy, retry after some time",
-	[CUCKOO_FILTER_RETRY] = "Retry"
-};
-
-const char *cuckoo_strerr(CUCKOO_FILTER_RETURN errnum)
-{
-	return _cuckoo_errstr[errnum];
-}
-
 static inline uint32_t hash(const uint8_t *, uint32_t, uint32_t, uint32_t,
 			    uint32_t);
 
