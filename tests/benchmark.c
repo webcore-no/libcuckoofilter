@@ -119,7 +119,7 @@ int main(void)
 	// create all workers
 	for(i = 0; i < WORKER_COUNT; i++) {
 		if(create_worker(&workers[i])) {
-			cuckoo_filter_free(&globals.filter);
+			cuckoo_filter_shm_free(&globals.filter);
 			printf("ERROR[%d]:%s", errno, strerror(errno));
 			exit(1);
 		}
@@ -130,14 +130,14 @@ int main(void)
 	for(int i = 0; i < WORKER_COUNT; i++) {
 		uint32_t worker_out = 0;
 		if(kill(workers[i].pid, SIGHUP)) {
-			cuckoo_filter_free(&globals.filter);
+			cuckoo_filter_shm_free(&globals.filter);
 			printf("ERROR[%d]:%s", errno, strerror(errno));
 			exit(1);
 		}
 		read(workers[i].fd, &worker_out, sizeof(uint32_t));
 		globals.op_counter += worker_out;
 	}
-	cuckoo_filter_free(&globals.filter);
+	cuckoo_filter_shm_free(&globals.filter);
 	printf("%d ops/s\n", globals.op_counter/ TEST_DURATION);
 	return 0;
 }
