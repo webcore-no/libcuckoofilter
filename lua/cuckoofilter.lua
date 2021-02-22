@@ -70,7 +70,8 @@ return function(name, size, depth, seed)
     end
 
     local filter = cuckoo_filter_t()
-    if C.cuckoo_filter_new(filter, size, depth or 100, seed or 0, C.cuckoo_filter_shm_alloc) ~= 0 then
+    if C.cuckoo_filter_new(filter, size, depth or 100, seed or 0,
+        C.cuckoo_filter_shm_alloc) ~= 0 then
         return nil, "failed to initialize filter"
     end
 
