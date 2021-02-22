@@ -13,28 +13,38 @@ A Cuckoo filter supports following operations:
 ```c
 CUCKOO_FILTER_RETURN
 cuckoo_filter_new(cuckoo_filter_t **filter, uint64_t max_key_count,
-		  uint64_t max_kick_attempts, uint32_t seed);
+		  uint64_t max_kick_attempts, uint32_t seed,
+		  cuckoo_allocate allocator);
 CUCKOO_FILTER_RETURN
-cuckoo_filter_shm_new(const char *name, cuckoo_filter_t **filter,
-		      uint64_t max_key_count, size_t max_kick_attempts,
-		      uint32_t seed);
+cuckoo_filter_load(cuckoo_filter_t **filter, int fd, cuckoo_allocate allocator);
+
+CUCKOO_FILTER_RETURN
+cuckoo_filter_save(cuckoo_filter_t *filter, int fd);
 ```
-creates a filter, shm variant using shm to make a lockless multi process filter.
+creates, load or save filter.
 
 ```c
+// Allocators
+// SHM
+CUCKOO_FILTER_RETURN cuckoo_filter_shm_free(cuckoo_filter_t **filter);
+
+CUCKOO_FILTER_RETURN cuckoo_filter_shm_alloc(cuckoo_filter_t **filter,
+					     size_t size);
+// Single process
 CUCKOO_FILTER_RETURN cuckoo_filter_free(cuckoo_filter_t **filter);
+
+CUCKOO_FILTER_RETURN cuckoo_filter_alloc(cuckoo_filter_t **filter, size_t size);
 ```
-destroys a filter
+free filter, remember to always use the same allocator and free function.
 ```c
 CUCKOO_FILTER_RETURN
-cuckoo_filter_add(cuckoo_filter_t *filter, const uint8_t *key,
-		  uint64_t key_length_in_bytes);
+cuckoo_filter_add(cuckoo_filter_t *filter, const void *key, size_t keylen);
+
 CUCKOO_FILTER_RETURN
-cuckoo_filter_remove(cuckoo_filter_t *filter, const uint8_t *key,
-		     uint64_t key_length_in_bytes);
+cuckoo_filter_remove(cuckoo_filter_t *filter, const void *key, size_t keylen);
+
 CUCKOO_FILTER_RETURN
-cuckoo_filter_contains(cuckoo_filter_t *filter, const uint8_t *key,
-		       uint64_t key_length_in_bytes);
+cuckoo_filter_contains(cuckoo_filter_t *filter, const void *key, size_t keylen);
 ```
 add, remove and test membership in order
 
@@ -45,9 +55,9 @@ add, remove and test membership in order
 #include <sys/wait.h>
 #include <assert.h>
 #include <unistd.h>
-#include <cuckoo_filter.h>
+#include "../include/cuckoo_filter.h"
 
-int main(int argc, char **argv)
+int main(void)
 {
 	cuckoo_filter_t *filter;
 	bool rc;
@@ -55,14 +65,15 @@ int main(int argc, char **argv)
 	const uint8_t *key = (const uint8_t *)"shm_test_key";
 	uint64_t key_len = strlen((const char *)key);
 
-	rc = cuckoo_filter_shm_new("shmname", &filter, 500000, 100,
-			       (uint32_t)(time(NULL) & 0xffffffff));
+	rc = cuckoo_filter_new(&filter, 500000, 100,
+			       (uint32_t)(time(NULL) & 0xffffffff),
+			       cuckoo_filter_shm_alloc);
 	assert(rc == CUCKOO_FILTER_OK);
 
 	pid_t pid = fork();
 	assert(pid >= 0);
 
-	if(!pid) {
+	if (!pid) {
 		//Child
 		rc = cuckoo_filter_add(filter, key, key_len);
 		assert(rc == CUCKOO_FILTER_OK);
@@ -73,12 +84,11 @@ int main(int argc, char **argv)
 	rc = cuckoo_filter_contains(filter, key, key_len);
 	assert(rc == CUCKOO_FILTER_OK);
 
-	rc = cuckoo_filter_free(&filter);
+	rc = cuckoo_filter_shm_free(&filter);
 	assert(rc == CUCKOO_FILTER_OK);
 
 	return 0;
 }
-
 ```
 
 More c usage exsamples in exsample/
