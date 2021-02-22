@@ -75,7 +75,7 @@ return function(name, size, depth, seed)
         return nil, "failed to initialize filter"
     end
 
-    ffi.gc(filter, C.cuckoo_filter_free)
+    ffi.gc(filter, C.cuckoo_filter_shm_free)
 
     return {
         add = function(element)
