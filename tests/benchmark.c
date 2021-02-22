@@ -10,11 +10,11 @@
 
 #define ELEMENTS 100000000
 #define TEST_DURATION 10
-#define PREFILL 0.5
+#define PREFILL 0.1
 #define CONTAINS_P 85
 #define ADD_P 10
 #define REMOVE_P 5
-
+#define WORKER_COUNT 8
 
 
 typedef struct {
@@ -26,17 +26,21 @@ _globals globals;
 
 void worker_loop()
 {
+	const u_int8_t key[] = "www.foobar.co.uk";
+	u_int64_t key_len= strlen((const char *)key);
+	int *k = (int *)key;
 	srand(getpid());
+	*k = rand();
 	while(true) {
-		int k = rand();
-		int n = k%100;
+		int n = (*k)%100;
 		if(n < CONTAINS_P) {
-			cuckoo_filter_contains(globals.filter,(const uint8_t *)&k, sizeof(k));
+			cuckoo_filter_contains(globals.filter, key, key_len);
 		} else if(n < (CONTAINS_P+ADD_P)) {
-			cuckoo_filter_add(globals.filter,(const uint8_t *)&k, sizeof(k));
+			cuckoo_filter_add(globals.filter, key, key_len);
 		} else {
-			cuckoo_filter_remove(globals.filter,(const uint8_t *)&k, sizeof(k));
+			cuckoo_filter_remove(globals.filter, key, key_len);
 		}
+		(*k)++;
 		globals.op_counter++;
 	}
 }
@@ -90,14 +94,13 @@ int create_worker(worker *wrk)
 	return 0;
 }
 
-#define wc 8
 int main(void)
 {
 	if(signal(SIGHUP, &handle_sighup) == SIG_ERR) {
 		printf("ERROR[%d]:%s\n", errno, strerror(errno));
 		exit(1);
 	}
-	worker workers[wc];
+	worker workers[WORKER_COUNT];
 	if(cuckoo_filter_shm_new("tshm", &globals.filter, ELEMENTS, 150, 123)) {
 		printf("ERROR: falied to make filter");
 		exit(1);
@@ -114,7 +117,7 @@ int main(void)
 	}
 	printf("prefill done\n");
 	// create all workers
-	for(i = 0; i < wc; i++) {
+	for(i = 0; i < WORKER_COUNT; i++) {
 		if(create_worker(&workers[i])) {
 			cuckoo_filter_free(&globals.filter);
 			printf("ERROR[%d]:%s", errno, strerror(errno));
@@ -124,7 +127,7 @@ int main(void)
 	// sleep some time
 	sleep(TEST_DURATION);
 	// Kill all workers
-	for(int i = 0; i < wc; i++) {
+	for(int i = 0; i < WORKER_COUNT; i++) {
 		uint32_t worker_out = 0;
 		if(kill(workers[i].pid, SIGHUP)) {
 			cuckoo_filter_free(&globals.filter);
