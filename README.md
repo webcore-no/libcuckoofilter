@@ -101,7 +101,7 @@ events{}
 
 http {
     init_by_lua_block {
-        local cuckoo, err = require("cuckoofilter")("ckf_1",1000000, 100, 0)
+        local cuckoo, err = require("cuckoofilter")(1000000, 100, 0)
         if not cuckoo then
             return ngx.log(ngx.ERR, "INIT_ERR: ", err)
         end

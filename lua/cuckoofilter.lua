@@ -60,7 +60,7 @@ local string_check = function(filter, func, element)
     return func(filter, element, #element) == 0
 end
 
-return function(name, size, depth, seed)
+return function(size, depth, seed)
     if type(size) ~= "number" or size < 0 then
         return nil, "size must be a positive number"
     end
