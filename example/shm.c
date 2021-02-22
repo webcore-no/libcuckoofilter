@@ -1,12 +1,13 @@
 #include "../include/cuckoo_filter.h"
 
-int main(int argc, char **argv)
+int main(void)
 {
 	cuckoo_filter_t *filter;
 	bool rc;
 
-	rc = cuckoo_filter_shm_new("foobar", &filter, 500000, 100,
-			       (uint32_t)(time(NULL) & 0xffffffff));
+	rc = cuckoo_filter_new(&filter, 500000, 100,
+			       (uint32_t)(time(NULL) & 0xffffffff),
+			       cuckoo_filter_shm_alloc);
 	if (CUCKOO_FILTER_OK != rc) {
 		printf("%s/%d: %d\n", __func__, __LINE__, rc);
 	}
@@ -33,12 +34,11 @@ int main(int argc, char **argv)
 		printf("%s/%d: %d\n", __func__, __LINE__, rc);
 	}
 
-	rc = cuckoo_filter_free(&filter);
+	rc = cuckoo_filter_shm_free(&filter);
 	if (CUCKOO_FILTER_OK != rc) {
 		printf("%s/%d: %d\n", __func__, __LINE__, rc);
 	}
 
 	return 0;
-
 }
 

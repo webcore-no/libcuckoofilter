@@ -101,7 +101,7 @@ int main(void)
 		exit(1);
 	}
 	worker workers[WORKER_COUNT];
-	if(cuckoo_filter_shm_new("tshm", &globals.filter, ELEMENTS, 150, 123)) {
+	if(cuckoo_filter_new(&globals.filter, ELEMENTS, 150, 123, cuckoo_filter_shm_alloc)) {
 		printf("ERROR: falied to make filter");
 		exit(1);
 	}

@@ -10,9 +10,14 @@ OBJECTS := $(SOURCE:src/%.c=build/%.o)
 TSOURCE := $(wildcard tests/*.c)
 TESTS := $(TSOURCE:%.c=%)
 
-all: build/libcuckoofilter.so build/libcuckoofilter.a
+ESOURCE := $(wildcard example/*.c)
+EXSAMPLES := $(ESOURCE:%.c=%)
+
+all: build/libcuckoofilter.so build/libcuckoofilter.a tests examples
 
 tests: $(TESTS)
+
+examples: $(EXSAMPLES)
 
 run_tests: tests/tests
 	tests/tests
@@ -22,6 +27,9 @@ benchmark: tests/benchmark
 
 collision: tests/collision
 	tests/collision
+
+example/%: $(OBJECTS) example/%.c
+	$(CC) $(CFLAGS) -lcheck -lrt $^ -o $@
 
 tests/%: $(OBJECTS) tests/%.c
 	$(CC) $(CFLAGS) -lcheck -lrt $^ -o $@
@@ -36,7 +44,7 @@ build:
 	mkdir build
 
 clean:
-	rm -rf build $(TESTS)
+	rm -rf build $(TESTS) $(EXSAMPLES)
 
 build/%.o: src/%.c build
 	$(CC) $(CFLAGS) -c $< -o $@
