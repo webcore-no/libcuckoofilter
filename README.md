@@ -140,6 +140,11 @@ http {
 
 ## Installation and testing
 ### Install
+xxhash[2] is needed to build, you install it or just.
+```bash
+cd src/
+wget https://raw.githubusercontent.com/Cyan4973/xxHash/dev/xxhash.h
+```
 ``` sh
 make
 make install
@@ -164,5 +169,5 @@ Work by Jonah H. Harris licensed under The MIT License.
 Changes licensed under AGPL
 
 ## References
-* "Cuckoo Filter: Better Than Bloom" by Bin Fan, Dave Andersen, and Michael Kaminsky
-
+- [1] "Cuckoo Filter: Better Than Bloom" by Bin Fan, Dave Andersen, and Michael Kaminsky
+- [2] [GitHub - Cyan4973/xxHash](https://github.com/Cyan4973/xxHash)

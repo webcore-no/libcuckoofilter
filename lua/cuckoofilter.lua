@@ -47,7 +47,7 @@ CUCKOO_FILTER_RETURN cuckoo_filter_free(cuckoo_filter_t **filter);
 CUCKOO_FILTER_RETURN cuckoo_filter_alloc(cuckoo_filter_t **filter, size_t size);
 ]]
 
-local C = ffi.load("../build/libcuckoofilter.so")
+local C = ffi.load("libcuckoofilter.so")
 
 local cuckoo_filter_t = ffi.typeof("cuckoo_filter_t *[1]")
 
